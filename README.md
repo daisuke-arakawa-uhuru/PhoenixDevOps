@@ -7,6 +7,8 @@ DevOps x AI Agent Hackathon 2026 用リポジトリです。
 ```text
 PhoenixDevOps/
 ├── apps/
+│   ├── api/                    # API
+│   ├── ui/                     # UI
 │   └── analysis-worker/        # Cloud Tasks から起動される解析ワーカー
 ├── documents/
 │   ├── product/                # プロダクト概要
