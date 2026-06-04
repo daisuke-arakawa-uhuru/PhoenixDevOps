@@ -10,7 +10,7 @@ from analysis_worker.engines import (
 from analysis_worker.gemini import GeminiSettings, build_gemini_client
 from analysis_worker.orchestrator import AnalysisOrchestrator
 from analysis_worker.repositories import FirestoreJobRepository
-from analysis_worker.storage import GcsArtifactWriter, ReferenceOnlyInputLoader
+from analysis_worker.storage import GcsArtifactWriter, GcsInputLoader
 
 
 def build_orchestrator(config: WorkerConfig) -> AnalysisOrchestrator:
@@ -23,7 +23,7 @@ def build_orchestrator(config: WorkerConfig) -> AnalysisOrchestrator:
     )
     return AnalysisOrchestrator(
         job_repository=FirestoreJobRepository(config.firestore_jobs_collection),
-        input_loader=ReferenceOnlyInputLoader(),
+        input_loader=GcsInputLoader(),
         artifact_writer=GcsArtifactWriter(
             results_bucket=config.results_bucket,
             results_prefix_template=config.results_prefix_template,

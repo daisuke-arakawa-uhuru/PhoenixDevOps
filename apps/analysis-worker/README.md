@@ -8,7 +8,7 @@ Issue #2 のインフラ構成や Issue #3 の HTTP API 実装と後から接続
 - `main.py`: Cloud Tasks から起動される Cloud Functions HTTP エントリポイント
 - `analysis_worker/payload.py`: Cloud Tasks payload の検証と正規化
 - `analysis_worker/repositories.py`: Firestore のジョブ状態管理境界
-- `analysis_worker/storage.py`: 入力参照と成果物保存の境界
+- `analysis_worker/storage.py`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `analysis_worker/orchestrator.py`: ジョブ状態遷移と解析フェーズ実行制御
 - `analysis_worker/engines.py`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
 
@@ -70,47 +70,57 @@ PYTHONPYCACHEPREFIX=/private/tmp/phoenixdevops-pycache python3 -m compileall app
 
 ## ローカル実行
 
-- GCP の Firestore / Cloud Storage / Cloud Tasks を使わず、ローカルファイルでワーカーを通し実行できます。
-- `--dry-run` を付けると Gemini API は呼び出さず、prompt 経路と成果物生成だけを確認します。
+ローカル環境で解析ワーカーを実行し、Gemini API（または dry-run）による成果物生成を確認できます。
 
-- ローカル実行では、入力ソースやドキュメントは別の場所へコピー・保管しません。
-- `--source` で指定したディレクトリまたは ZIP、`--document` で指定したファイルをその場で読み取り、読み取ったテキストをメモリ上の `InputBundle` として解析・生成エンジンへ渡します。
-- ローカル実行でファイルとして保存されるのは生成成果物だけです。
+### 1. 前提条件
 
-- 本番では入力ファイルは Cloud Storage の `uploads/` に保管され、成果物は `results/` に保存されます。
-- 一方、ローカル実行では入力は指定元ファイルを直接参照し、成果物だけを `output/{job_id}/` に保存します。
+- **Python環境**: Python 3.10以上
+- **依存ライブラリ**: `pip install -r requirements.txt` でインストール済みであること
+- **APIキー**: Gemini APIを使用する場合、`GEMINI_API_KEY` が必要
+
+### 2. 設定項目
+
+#### 環境変数
+| 変数名 | 必須 | 説明 |
+| :--- | :--- | :--- |
+| `GEMINI_API_KEY` | 任意(*) | Gemini APIのキー。dry-run時は不要。 |
+| `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-2.0-flash` |
+| `GEMINI_DRY_RUN` | 任意 | `true`に設定すると、APIを呼び出さずダミー応答を返します。 |
+
+(*) `--dry-run` 引数を付けない場合は必須。
+
+#### 実行引数 (`local_runner.py`)
+| 引数 | 必須 | 説明 |
+| :--- | :--- | :--- |
+| `--source` | **はい** | 解析対象のソース（ZIPファイルまたはディレクトリ） |
+| `--document` | **はい** | 比較対象のドキュメント。複数指定可能。 |
+| `--project-name`| いいえ | プロジェクト名（レポート内に反映されます） |
+| `--job-id` | いいえ | 実行ID。出力先フォルダ名 `output/{job_id}/` に使用されます。 |
+| `--dry-run` | いいえ | APIを呼び出さずに実行する場合に指定します。 |
+
+### 3. 実行例
+
+`INPUT_DIR` という変数に入力ファイルのディレクトリを代入して実行する例です。
 
 ```bash
-INPUT_DIR="/Users/P767-2513/Documents/案件/PhoenixDevOps-docs/input"
+# 1. 入力ディレクトリとAPIキーの設定
+export INPUT_DIR="/path/to/your/input"
+export GEMINI_API_KEY="your-api-key-here"
 
+# 2. 解析の実行
 PYTHONPATH=apps/analysis-worker python3 -m analysis_worker.local_runner \
   --source "$INPUT_DIR/CustomerServiceManagement.zip" \
-  --document "$INPUT_DIR/カスタマーサポート管理SaaS (CustomerServiceManagement) アーキテクチャ設計書.pdf" \
-  --project-name CustomerServiceManagement \
-  --job-id customer-service-management-local \
-  --dry-run
+  --document "$INPUT_DIR/architecture_design.pdf" \
+  --project-name "MyProject" \
+  --job-id "local-test-01"
 ```
 
-出力先は `output/customer-service-management-local/` です。
+- **出力先**: `output/local-test-01/` にレポートが生成されます。
+- **動作確認のみ**: APIを消費したくない場合は、コマンド末尾に `--dry-run` を追加してください。
 
-Gemini API を実際に呼び出す場合は、`GEMINI_API_KEY` を設定して `--dry-run` を外します。
-モデル名は必要に応じて `GEMINI_MODEL` で変更できます。
+---
 
-```bash
-INPUT_DIR="/Users/P767-2513/Documents/案件/PhoenixDevOps-docs/input"
-
-GEMINI_API_KEY=... \
-PYTHONPATH=apps/analysis-worker python3 -m analysis_worker.local_runner \
-  --source "$INPUT_DIR/CustomerServiceManagement.zip" \
-  --document "$INPUT_DIR/カスタマーサポート管理SaaS (CustomerServiceManagement) アーキテクチャ設計書.pdf" \
-  --project-name CustomerServiceManagement \
-  --job-id customer-service-management-gemini-local
-```
-
-現時点では PDF 本文抽出は本実装前です。
-また、ZIP 内の暗号化されているファイルや UTF-8 として読めないファイルは、ローカル実行時にスキップします。
-
-## デプロイ例
+## 開発・テスト
 
 ```bash
 gcloud functions deploy analysis-worker \
@@ -123,6 +133,6 @@ gcloud functions deploy analysis-worker \
   --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id}
 ```
 
-現時点では Gemini prompt と呼び出し口までの仮実装です。
+現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。
 `GEMINI_API_KEY` がない場合、または `--dry-run` / `GEMINI_DRY_RUN=true` の場合は dry-run 応答で成果物を生成します。
-ZIP 展開、PDF/Excel の本格抽出、差分分類の精度改善は次の実装単位で進めます。
+PDF/Excel の抽出精度改善、差分分類の精度改善は次の実装単位で進めます。

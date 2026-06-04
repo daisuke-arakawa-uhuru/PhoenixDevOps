@@ -10,7 +10,11 @@ class _Specification(Protocol):
     summary: str
 
 
-def build_source_analysis_prompt(payload: AnalysisTaskPayload, inputs: InputBundle) -> str:
+def build_source_analysis_prompt(
+    payload: AnalysisTaskPayload,
+    inputs: InputBundle,
+    static_overview_markdown: str = "",
+) -> str:
     return "\n".join(
         [
             "[TASK: SOURCE_ANALYSIS]",
@@ -38,6 +42,10 @@ def build_source_analysis_prompt(payload: AnalysisTaskPayload, inputs: InputBund
             "",
             "Markdown で、各項目に根拠ファイルパスを添えてください。",
             "",
+            "## 事前抽出済みの構造情報",
+            "",
+            static_overview_markdown or "事前抽出済みの構造情報はありません。",
+            "",
             "## 入力ファイル抜粋",
             "",
             _format_text_files(inputs.source_files),
@@ -45,7 +53,11 @@ def build_source_analysis_prompt(payload: AnalysisTaskPayload, inputs: InputBund
     )
 
 
-def build_document_extraction_prompt(payload: AnalysisTaskPayload, inputs: InputBundle) -> str:
+def build_document_extraction_prompt(
+    payload: AnalysisTaskPayload,
+    inputs: InputBundle,
+    document_overview_markdown: str = "",
+) -> str:
     return "\n".join(
         [
             "[TASK: DOCUMENT_EXTRACTION]",
@@ -66,6 +78,10 @@ def build_document_extraction_prompt(payload: AnalysisTaskPayload, inputs: Input
             "## 出力形式",
             "",
             "Markdown で、仕様項目、内容、根拠ドキュメント、判断不能事項を整理してください。",
+            "",
+            "## 事前抽出済みのドキュメント情報",
+            "",
+            document_overview_markdown or "事前抽出済みのドキュメント情報はありません。",
             "",
             "## ドキュメント抜粋",
             "",
