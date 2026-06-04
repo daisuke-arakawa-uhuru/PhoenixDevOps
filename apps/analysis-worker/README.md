@@ -12,26 +12,48 @@ Issue #2 のインフラ構成や Issue #3 の HTTP API 実装と後から接続
 - `analysis_worker/orchestrator.py`: ジョブ状態遷移と解析フェーズ実行制御
 - `analysis_worker/engines.py`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
 
-## システム構成図
+## システム構成
+
+### クラウド実行（本番）
+
+Cloud Tasks を起点に Cloud Functions が起動し、GCP の各種サービスと連携して解析を行います。
 
 ```mermaid
 flowchart LR
     Api["HTTP API<br/>Issue #3"] -->|"ジョブ登録"| Tasks["Cloud Tasks"]
     Tasks -->|"解析ジョブ起動"| WorkerEntry["解析ワーカー<br/>Cloud Functions"]
-    LocalRunner["ローカル実行<br/>local_runner.py"] -->|"dry-run / Gemini 実行"| WorkerEntry
 
     subgraph Worker["解析ワーカー内部"]
-        WorkerEntry --> Orchestrator["解析オーケストレーター<br/>状態遷移・実行制御"]
-        Orchestrator --> Input["入力取得<br/>ソース / ドキュメント"]
-        Orchestrator --> Engines["解析・生成エンジン<br/>F-02 / F-03 / F-04 / F-05"]
-        Orchestrator --> Output["成果物保存<br/>Markdown"]
+        WorkerEntry --> Orchestrator["解析オーケストレーター"]
+        Orchestrator --> Input["入力取得"]
+        Orchestrator --> Engines["解析・生成エンジン"]
+        Orchestrator --> Output["成果物保存"]
     end
 
     Input -->|"読み込み"| Uploads["Cloud Storage<br/>uploads/"]
-    Engines -->|"prompt 実行"| Gemini["Gemini API<br/>または dry-run"]
+    Engines -->|"prompt 実行"| Gemini["Gemini API"]
     Output -->|"保存"| Results["Cloud Storage<br/>results/"]
-    Orchestrator -->|"running / succeeded / failed"| Firestore["Firestore<br/>jobs"]
-    Output -->|"ローカル実行時"| LocalOutput["ローカル出力<br/>output/"]
+    Orchestrator -->|"状態管理"| Firestore["Firestore<br/>jobs"]
+```
+
+### ローカル実行（開発・検証）
+
+`local_runner.py` を使用し、ローカルファイルを入力として実行します。Gemini API の呼び出しを省略（dry-run）することも可能です。
+
+```mermaid
+flowchart LR
+    User["開発者"] -->|"コマンド実行"| LocalRunner["local_runner.py"]
+
+    subgraph Worker["解析ワーカー内部 (Local)"]
+        LocalRunner --> Orchestrator["解析オーケストレーター"]
+        Orchestrator --> Input["ローカル入力取得"]
+        Orchestrator --> Engines["解析・生成エンジン"]
+        Orchestrator --> Output["ローカル出力"]
+    end
+
+    Input -->|"直接参照"| LocalFiles["ローカルファイル<br/>(Source / Docs)"]
+    Engines -->|"prompt 実行"| Gemini["Gemini API<br/>または dry-run"]
+    Output -->|"保存"| LocalOutput["ローカル出力<br/>output/{job_id}/"]
 ```
 
 ## 暫定タスク Payload
