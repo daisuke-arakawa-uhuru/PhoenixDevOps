@@ -1,0 +1,148 @@
+name: '🔎 Gemini Review'
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+  issue_comment:
+    types:
+      - created
+  workflow_dispatch:
+    inputs:
+      github_pr_number:
+        description: 'Pull Request number to review'
+        required: true
+        type: string
+      additional_context:
+        description: 'Any additional context or focus areas for the review'
+        required: false
+        type: string
+
+concurrency:
+  group: '${{ github.workflow }}-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.github_pr_number }}'
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: 'bash'
+
+jobs:
+  review:
+    # Trigger automatically on PR, manually via dispatch,
+    # or on-demand via comment "@gemini-cli /review" from OWNER/MEMBER/COLLABORATOR on a PR
+    if: |-
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'workflow_dispatch') ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '@gemini-cli /review') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      )
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 7
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+      issues: 'write'
+      pull-requests: 'write'
+    steps:
+      - name: 'Checkout repository'
+        uses: 'actions/checkout@v4'
+        with:
+          # For comment-based and dispatch-based triggers, we want to checkout the PR branch
+          ref: 'refs/pull/${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.github_pr_number }}/head'
+          persist-credentials: 'false'
+
+      - name: 'Extract additional context'
+        id: 'extract_context'
+        shell: 'bash'
+        run: |-
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            COMMENT_BODY="${{ github.event.comment.body }}"
+            # Remove "@gemini-cli /review" prefix and trim whitespace/newlines
+            CONTEXT=$(echo "$COMMENT_BODY" | sed -E 's/^@gemini-cli \/review[[:space:]]*//' | tr -d '\r\n')
+            echo "context=${CONTEXT}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "context=${{ github.event.inputs.additional_context }}" >> $GITHUB_OUTPUT
+          else
+            echo "context=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 'Prepare prompt context'
+        shell: 'bash'
+        run: |-
+          mkdir -p .gemini
+          jq -n \
+            --arg repo "${REPOSITORY}" \
+            --arg pr "${PULL_REQUEST_NUMBER}" \
+            --arg context "${ADDITIONAL_CONTEXT}" \
+            '{repository: $repo, pull_request_number: $pr, additional_context: $context}' > .gemini/context.json
+        env:
+          REPOSITORY: '${{ github.repository }}'
+          PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.github_pr_number }}'
+          ADDITIONAL_CONTEXT: '${{ steps.extract_context.outputs.context }}'
+
+      - name: 'Run Gemini pull request review'
+        uses: 'google-github-actions/run-gemini-cli@v0'
+        id: 'gemini_pr_review'
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: 'true'
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN || github.token }}'
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+        with:
+          gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}'
+          gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}'
+          gcp_service_account: '${{ vars.SERVICE_ACCOUNT_EMAIL }}'
+          gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}'
+          gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
+          gemini_cli_version: '${{ vars.GEMINI_CLI_VERSION }}'
+          gemini_debug: true
+          google_api_key: '${{ secrets.GOOGLE_API_KEY }}'
+          use_gemini_code_assist: '${{ vars.GOOGLE_GENAI_USE_GCA }}'
+          use_vertex_ai: '${{ vars.GOOGLE_GENAI_USE_VERTEXAI }}'
+          upload_artifacts: '${{ vars.UPLOAD_ARTIFACTS }}'
+          workflow_name: 'gemini-review'
+          github_pr_number: '${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.github_pr_number }}'
+          settings: |-
+            {
+              "model": {
+                "maxSessionTurns": 25
+              },
+              "telemetry": {
+                "enabled": true,
+                "target": "local",
+                "outfile": ".gemini/telemetry.log"
+              },
+              "mcpServers": {
+                "github": {
+                  "command": "docker",
+                  "args": [
+                    "run",
+                    "-i",
+                    "--rm",
+                    "-e",
+                    "GITHUB_PERSONAL_ACCESS_TOKEN",
+                    "ghcr.io/github/github-mcp-server:v0.27.0"
+                  ],
+                  "includeTools": [
+                    "add_comment_to_pending_review",
+                    "pull_request_read",
+                    "pull_request_review_write"
+                  ],
+                  "env": {
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+                  }
+                }
+              },
+              "tools": {
+                "core": []
+              }
+            }
+          extensions: |
+            [
+              "https://github.com/gemini-cli-extensions/code-review"
+            ]
+          prompt: '/pr-code-review'
