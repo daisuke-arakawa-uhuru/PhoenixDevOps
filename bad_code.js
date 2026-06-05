@@ -3,7 +3,7 @@ const pg = require('pg');
 const app = express();
 
 // Issue 1: Hardcoded secret/API key
-const DB_PASSWORD = "super-secret-password-12345";
+const DB_PASSWORD = "super-secret-password-123456";
 const API_KEY = "dummy-api-key-12345";
 
 const client = new pg.Client({
