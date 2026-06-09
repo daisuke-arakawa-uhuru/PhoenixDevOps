@@ -1,73 +1,68 @@
-# React + TypeScript + Vite
+# PhoenixDevOps - ドキュメント・ドリフト検知エージェント Web UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+このプロジェクトは、「ドキュメント・ドリフト検知＆真実の設計書生成エージェント」のWebユーザーインターフェースです。
+ソースコードと古いドキュメント群をアップロードし、解析の進捗を監視し、結果のマークダウンをプレビュー・ダウンロードできます。
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🚀 起動方法
 
-## React Compiler
+### 1. 依存関係のインストール
+`apps/ui` ディレクトリでパッケージのインストールを行います。
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd apps/ui
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 2. 開発サーバーの起動
+ローカル開発サーバーを起動します。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+npm run dev
+```
+起動に成功すると、ブラウザで **`http://localhost:5173/`** が開くか、またはコンソールに出力されたURLからアクセス可能になります。
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+---
+
+## 🧪 モック検証モード（API不要での確認）
+
+実際のバックエンドAPIサーバー（Cloud Functions）が起動していない状態でも、UIの挙動やデザインを確認するための**モックモード**が搭載されています。
+
+### 使用方法
+ブラウザで起動したURLの末尾に、クエリパラメータ **`?mock=true`** を追加してアクセスします。
+👉 **例: `http://localhost:5173/?mock=true`**
+
+### 特徴
+* 画面上部に **「デモ用データ（テスト用ファイル）を自動セットする」** ボタンが表示されます。これをクリックするだけで入力ファイルがダミー設定され、すぐに「解析開始」を試すことができます。
+* `LocalStorage` を利用して `queued` ➜ `running` ➜ `succeeded` の進捗遷移を自動シミュレートし、完了後にダミーの「真の設計書」および「差分レポート」のマークダウンをレンダリングします。
+* プロジェクト名に `fail` という文字列を含めて実行すると、解析の失敗（`failed`）状態をテストすることができます。
+
+---
+
+## ⚙️ 環境変数設定
+
+プロジェクトルートまたは `apps/ui/.env.local` などの環境変数ファイルで以下のパラメータを調整できます。
+
+| 変数名 | デフォルト値 | 説明 |
+| --- | --- | --- |
+| `VITE_API_URL` | `http://localhost:8080` | バックエンドCloud Functions (HTTP API) のエンドポイント。 |
+| `VITE_USE_MOCK` | `false` | `true` に設定すると、クエリパラメータ `?mock=true` が無くても常にモックモードで動作します。 |
+
+---
+
+## 🛠️ その他のコマンド
+
+### プロダクションビルド
+静的ファイルのビルドを行います（`dist/` ディレクトリに生成されます）。
+
+```bash
+npm run build
+```
+
+### プレビュー表示
+ビルドされた静的成果物をローカルでプレビュー起動します。
+
+```bash
+npm run preview
 ```
