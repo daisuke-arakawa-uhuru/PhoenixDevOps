@@ -1,0 +1,36 @@
+# === Terraform ===
+# ローカル作業ディレクトリ・プラグイン
+**/.terraform/*
+# state（GCS バックエンドで共有。ローカル state はコミットしない）
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+# 変数の実値（example のみコミット可）
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+# plan 出力・クラッシュログ
+*.tfplan
+crash.log
+crash.*.log
+# lock ファイルはコミットする（再現性のため除外しない）
+!**/.terraform.lock.hcl
+
+# === Secrets / 認証情報 ===
+*-key.json
+*-credentials.json
+service-account*.json
+.env
+.env.*
+!.env.example
+secrets/
+
+# === Claude Code / エージェント個人設定 ===
+.claude/settings.local.json
+
+# === OS / エディタ ===
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

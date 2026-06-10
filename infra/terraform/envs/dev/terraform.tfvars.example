@@ -1,0 +1,22 @@
+# このファイルをコピーして terraform.tfvars を作成し、実値を設定する。
+#   cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars は .gitignore 済み（コミット禁止）。
+
+# 山本担当のプロジェクトセットアップで払い出された GCP プロジェクト ID
+project_id = "your-gcp-project-id"
+
+# リージョン（既定: asia-northeast1 / 東京）
+region = "asia-northeast1"
+
+# 環境識別子
+environment = "dev"
+
+# Cloud Storage ロケーション
+storage_location = "ASIA-NORTHEAST1"
+
+# 保持日数（dev のコスト最適化用。本番相当では要見直し）
+uploads_retention_days = 30
+results_retention_days = 90
+
+# dev で作り直しを容易にしたい場合のみ true。中身ごと削除可能になるため注意。
+force_destroy = false
