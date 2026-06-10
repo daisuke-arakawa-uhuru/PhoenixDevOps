@@ -34,3 +34,9 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# === Gemini CLI ===
+.gemini/context.json
+.gemini/settings.json
+.gemini/telemetry.log
+*.log
