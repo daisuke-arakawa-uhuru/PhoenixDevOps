@@ -1,6 +1,18 @@
 # Drift Agent HTTP API
 
-Issue #3 用の Cloud Functions HTTP API です。アップロード受付、解析ジョブ作成、ジョブ状態取得、成果物URL取得を担当します。
+Issue #3 用の Cloud Functions HTTP API です。Node.js 24、TypeScript、Hono で実装し、アップロード受付、解析ジョブ作成、ジョブ状態取得、成果物 URL 取得を担当します。
+
+## 構成
+
+- `src/index.ts`: Cloud Functions HTTP エントリポイント `driftApi`
+- `src/app.ts`: Hono のルーティング、CORS、エラーハンドリング
+- `src/service.ts`: アップロード、ジョブ作成、状態取得、成果物 URL 取得の業務ロジック
+- `src/storage.ts`: Cloud Storage へのアップロードと署名付き URL 生成
+- `src/repositories.ts`: Firestore の uploads/jobs repository
+- `src/tasks.ts`: Cloud Tasks への解析ワーカー起動タスク登録
+- `src/config.ts`: 環境変数の読み込みと検証
+- `test/*.test.ts`: Node.js test runner のテスト
+- `dist/`: `npm run build` で生成される Cloud Functions 実行用 JavaScript
 
 ## エンドポイント
 
@@ -10,7 +22,7 @@ Issue #3 用の Cloud Functions HTTP API です。アップロード受付、解
 
 | フィールド | 必須 | 内容 |
 | --- | --- | --- |
-| `sourceArchive` | はい | ソースコードZIP |
+| `sourceArchive` | はい | ソースコード ZIP |
 | `documents` | はい | 既存ドキュメント。複数指定可 |
 | `projectName` | いいえ | プロジェクト名 |
 
@@ -71,7 +83,7 @@ Firestore の `jobs/{jobId}` を読み、現在の状態を返します。
 
 ### `GET /jobs/{jobId}/results`
 
-`succeeded` のジョブだけ成果物の署名付きURLを返します。ワーカーが保存する成果物は `true-design.md` と `document-drift-report.md` を想定しています。
+`succeeded` のジョブだけ成果物の署名付き URL を返します。ワーカーが保存する成果物は `true-design.md` と `document-drift-report.md` を想定しています。
 
 ## Firestore schema
 
@@ -113,7 +125,7 @@ Firestore の `jobs/{jobId}` を読み、現在の状態を返します。
 
 | 変数名 | 必須 | 説明 |
 | --- | --- | --- |
-| `UPLOADS_BUCKET` | はい | アップロードと成果物を保存するCloud Storage bucket |
+| `UPLOADS_BUCKET` | はい | アップロードと成果物を保存する Cloud Storage bucket |
 | `FIRESTORE_UPLOADS_COLLECTION` | いいえ | デフォルト: `uploads` |
 | `FIRESTORE_JOBS_COLLECTION` | いいえ | デフォルト: `jobs` |
 | `TASKS_PROJECT_ID` | 条件付き | Cloud Tasks project。未指定時は `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT` を使用 |
@@ -121,16 +133,20 @@ Firestore の `jobs/{jobId}` を読み、現在の状態を返します。
 | `TASKS_QUEUE` | はい | Cloud Tasks queue name |
 | `WORKER_URL` | はい | 解析ワーカー Cloud Functions URL |
 | `TASKS_SERVICE_ACCOUNT_EMAIL` | いいえ | ワーカー呼び出し用 OIDC service account |
-| `SIGNED_URL_EXPIRATION_SECONDS` | いいえ | 成果物URL有効秒数。デフォルト: `3600` |
+| `SIGNED_URL_EXPIRATION_SECONDS` | いいえ | 成果物 URL 有効秒数。デフォルト: `3600` |
 | `UPLOADS_PREFIX_TEMPLATE` | いいえ | デフォルト: `uploads/{upload_id}` |
 | `RESULTS_PREFIX_TEMPLATE` | いいえ | デフォルト: `results/{job_id}` |
 | `MAX_DOCUMENT_FILES` | いいえ | デフォルト: `600` |
 
 ## ローカル確認
 
+Node.js はリポジトリ root の `.node-version` に合わせて 24 系を使用します。
+
 ```bash
-PYTHONPATH=apps/api python3 -m unittest discover apps/api/tests
-PYTHONPYCACHEPREFIX=/private/tmp/phoenixdevops-api-pycache python3 -m compileall apps/api
+cd apps/api
+npm install
+npm run build
+npm test
 ```
 
 ## デプロイ例
@@ -138,11 +154,10 @@ PYTHONPYCACHEPREFIX=/private/tmp/phoenixdevops-api-pycache python3 -m compileall
 ```bash
 gcloud functions deploy drift-api \
   --gen2 \
-  --runtime python312 \
+  --runtime nodejs24 \
   --region asia-northeast1 \
   --source apps/api \
-  --entry-point drift_api \
+  --entry-point driftApi \
   --trigger-http \
   --set-env-vars UPLOADS_BUCKET=phoenix-uploads,FIRESTORE_UPLOADS_COLLECTION=uploads,FIRESTORE_JOBS_COLLECTION=jobs,TASKS_LOCATION=asia-northeast1,TASKS_QUEUE=analysis-jobs,WORKER_URL=https://example-worker-url
 ```
-

@@ -1,4 +1,0 @@
-functions-framework>=3.8.0,<4
-google-cloud-firestore>=2.19.0,<3
-google-cloud-storage>=2.18.0,<3
-google-cloud-tasks>=2.16.0,<3
