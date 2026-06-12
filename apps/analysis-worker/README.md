@@ -1,27 +1,24 @@
 # 解析ワーカー
 
-Issue #4 用の Cloud Functions バックグラウンドワーカーです。
+Issue #4 用の Cloud Functions バックグラウンドワーカーです。Cloud Tasks から HTTP で起動され、Cloud Storage から入力を読み込み、Firestore のジョブ状態を更新し、Gemini API で成果物を生成します。
 
-Issue #2 のインフラ構成や Issue #3 の HTTP API 実装と後から接続しやすいように、
-ワーカー内部は小さな境界に分けています。
+## 構成
 
-- `main.py`: Cloud Tasks から起動される Cloud Functions HTTP エントリポイント
-- `analysis_worker/payload.py`: Cloud Tasks payload の検証と正規化
-- `analysis_worker/repositories.py`: Firestore のジョブ状態管理境界
-- `analysis_worker/storage.py`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
-- `analysis_worker/orchestrator.py`: ジョブ状態遷移と解析フェーズ実行制御
-- `analysis_worker/engines.py`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
+- `src/index.js`: Cloud Functions HTTP エントリポイント `runAnalysisWorker`
+- `src/payload.js`: Cloud Tasks payload の検証と正規化
+- `src/repositories.js`: Firestore のジョブ状態管理境界
+- `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
+- `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
+- `src/engines.js`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
+- `src/prompts.js`: Gemini に渡す prompt 生成
+- `src/local-runner.js`: ローカル実行用 CLI
 
 ## システム構成
-
-### クラウド実行（本番）
-
-Cloud Tasks を起点に Cloud Functions が起動し、GCP の各種サービスと連携して解析を行います。
 
 ```mermaid
 flowchart LR
     Api["HTTP API<br/>Issue #3"] -->|"ジョブ登録"| Tasks["Cloud Tasks"]
-    Tasks -->|"解析ジョブ起動"| WorkerEntry["解析ワーカー<br/>Cloud Functions"]
+    Tasks -->|"解析ジョブ起動"| WorkerEntry["解析ワーカー<br/>Cloud Functions / Node.js"]
 
     subgraph Worker["解析ワーカー内部"]
         WorkerEntry --> Orchestrator["解析オーケストレーター"]
@@ -36,29 +33,9 @@ flowchart LR
     Orchestrator -->|"状態管理"| Firestore["Firestore<br/>jobs"]
 ```
 
-### ローカル実行（開発・検証）
+## タスク Payload
 
-`local_runner.py` を使用し、ローカルファイルを入力として実行します。Gemini API の呼び出しを省略（dry-run）することも可能です。
-
-```mermaid
-flowchart LR
-    User["開発者"] -->|"コマンド実行"| LocalRunner["local_runner.py"]
-
-    subgraph Worker["解析ワーカー内部 (Local)"]
-        LocalRunner --> Orchestrator["解析オーケストレーター"]
-        Orchestrator --> Input["ローカル入力取得"]
-        Orchestrator --> Engines["解析・生成エンジン"]
-        Orchestrator --> Output["ローカル出力"]
-    end
-
-    Input -->|"直接参照"| LocalFiles["ローカルファイル<br/>(Source / Docs)"]
-    Engines -->|"prompt 実行"| Gemini["Gemini API<br/>または dry-run"]
-    Output -->|"保存"| LocalOutput["ローカル出力<br/>output/{job_id}/"]
-```
-
-## 暫定タスク Payload
-
-HTTP API 側がまだ構築途中のため、ワーカーは `snake_case` と `camelCase` の両方を受け付けます。
+HTTP API 側との接続を容易にするため、`snake_case` と `camelCase` の両方を受け付けます。
 
 ```json
 {
@@ -83,78 +60,53 @@ HTTP API 側がまだ構築途中のため、ワーカーは `snake_case` と `c
 
 ## ローカル確認
 
+Node.js はリポジトリ root の `.node-version` に合わせて 24 系を使用します。
+
 ```bash
-# 単体テスト実行
-PYTHONPATH=apps/analysis-worker python3 -m unittest discover apps/analysis-worker/tests
-# コンパイル
-PYTHONPYCACHEPREFIX=/private/tmp/phoenixdevops-pycache python3 -m compileall apps/analysis-worker
+cd apps/analysis-worker
+npm test
 ```
 
 ## ローカル実行
 
-ローカル環境で解析ワーカーを実行し、Gemini API（または dry-run）による成果物生成を確認できます。
-
-### 1. 前提条件
-
-- **Python環境**: Python 3.10以上
-- **依存ライブラリ**: `pip install -r requirements.txt` でインストール済みであること
-- **APIキー**: Gemini APIを使用する場合、`GEMINI_API_KEY` が必要
-
-### 2. 設定項目
-
-#### 環境変数
-| 変数名 | 必須 | 説明 |
-| :--- | :--- | :--- |
-| `GEMINI_API_KEY` | 任意(*) | Gemini APIのキー。dry-run時は不要。 |
-| `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-2.0-flash` |
-| `GEMINI_DRY_RUN` | 任意 | `true`に設定すると、APIを呼び出さずダミー応答を返します。 |
-
-(*) `--dry-run` 引数を付けない場合は必須。
-
-#### 実行引数 (`local_runner.py`)
-| 引数 | 必須 | 説明 |
-| :--- | :--- | :--- |
-| `--source` | **はい** | 解析対象のソース（ZIPファイルまたはディレクトリ） |
-| `--document` | **はい** | 比較対象のドキュメント。複数指定可能。 |
-| `--project-name`| いいえ | プロジェクト名（レポート内に反映されます） |
-| `--job-id` | いいえ | 実行ID。出力先フォルダ名 `output/{job_id}/` に使用されます。 |
-| `--dry-run` | いいえ | APIを呼び出さずに実行する場合に指定します。 |
-
-### 3. 実行例
-
-`INPUT_DIR` という変数に入力ファイルのディレクトリを代入して実行する例です。
+依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。dry-run では `GEMINI_API_KEY` は不要です。
 
 ```bash
-# 1. 入力ディレクトリとAPIキーの設定
-export INPUT_DIR="/path/to/your/input"
-export GEMINI_API_KEY="your-api-key-here"
+cd apps/analysis-worker
+npm install
 
-# 2. 解析の実行
-PYTHONPATH=apps/analysis-worker python3 -m analysis_worker.local_runner \
-  --source "$INPUT_DIR/CustomerServiceManagement.zip" \
-  --document "$INPUT_DIR/architecture_design.pdf" \
+node src/local-runner.js \
+  --source "/path/to/input/CustomerServiceManagement.zip" \
+  --document "/path/to/input/architecture_design.pdf" \
   --project-name "MyProject" \
-  --job-id "local-test-01"
+  --job-id "local-test-01" \
+  --dry-run
 ```
 
-- **出力先**: `output/local-test-01/` にレポートが生成されます。
-- **動作確認のみ**: APIを消費したくない場合は、コマンド末尾に `--dry-run` を追加してください。
+出力先はデフォルトで `output/{job_id}/` です。変更する場合は `--output` を指定してください。
 
----
+## 環境変数
 
-## 開発・テスト
+| 変数名 | 必須 | 説明 |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | 任意 | Gemini API のキー。dry-run または未設定時は dry-run client を使用します。 |
+| `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-2.0-flash` |
+| `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で Gemini API を呼び出しません。 |
+| `FIRESTORE_JOBS_COLLECTION` | 任意 | ジョブ状態を保存する Firestore コレクション。デフォルト: `jobs` |
+| `RESULTS_BUCKET` | 任意 | 成果物保存先 bucket。未指定時は source archive と同じ bucket を使います。 |
+| `RESULTS_PREFIX_TEMPLATE` | 任意 | 成果物 prefix。デフォルト: `results/{job_id}` |
+
+## Cloud Functions デプロイ例
 
 ```bash
 gcloud functions deploy analysis-worker \
   --gen2 \
-  --runtime python312 \
+  --runtime nodejs24 \
   --region asia-northeast1 \
   --source apps/analysis-worker \
-  --entry-point run_analysis_worker \
+  --entry-point runAnalysisWorker \
   --trigger-http \
   --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id}
 ```
 
-現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。
-`GEMINI_API_KEY` がない場合、または `--dry-run` / `GEMINI_DRY_RUN=true` の場合は dry-run 応答で成果物を生成します。
-PDF/Excel の抽出精度改善、差分分類の精度改善は次の実装単位で進めます。
+現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
