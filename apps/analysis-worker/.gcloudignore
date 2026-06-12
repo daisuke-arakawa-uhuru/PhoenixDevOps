@@ -1,0 +1,9 @@
+.git
+.gitignore
+.gcloudignore
+node_modules/
+output/
+test/
+*.log
+.env
+.env.*
