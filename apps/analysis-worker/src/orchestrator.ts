@@ -1,18 +1,38 @@
-"use strict";
+import { AnalysisTaskPayload } from "./payload.js";
+import { JobRepository, JobStatus } from "./repositories.js";
+import { InputLoader } from "./storage.js";
+import {
+  AnalysisEngine,
+  DesignGenerator,
+  generatedArtifacts,
+  ExtractionResult,
+} from "./engines.js";
 
-const { generatedArtifacts } = require("./engines");
-const { JobStatus } = require("./repositories");
+export class WorkerResult {
+  jobId: string;
+  status: string;
+  artifactPaths: Record<string, string>;
+  message: string | null;
 
-class WorkerResult {
-  constructor({ jobId, status, artifactPaths, message = null }) {
+  constructor({
+    jobId,
+    status,
+    artifactPaths,
+    message = null,
+  }: {
+    jobId: string;
+    status: string;
+    artifactPaths: Record<string, string>;
+    message?: string | null;
+  }) {
     this.jobId = jobId;
     this.status = status;
     this.artifactPaths = artifactPaths;
     this.message = message;
   }
 
-  toResponse() {
-    const response = {
+  toResponse(): Record<string, any> {
+    const response: Record<string, any> = {
       jobId: this.jobId,
       status: this.status,
       artifactPaths: this.artifactPaths,
@@ -24,7 +44,15 @@ class WorkerResult {
   }
 }
 
-class AnalysisOrchestrator {
+export class AnalysisOrchestrator {
+  private jobRepository: JobRepository;
+  private inputLoader: InputLoader;
+  private artifactWriter: any; // TODO: Define ArtifactWriter interface properly
+  private sourceCodeEngine: AnalysisEngine;
+  private documentEngine: AnalysisEngine;
+  private trueDesignGenerator: DesignGenerator;
+  private driftReportGenerator: DesignGenerator;
+
   constructor({
     jobRepository,
     inputLoader,
@@ -33,6 +61,14 @@ class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+  }: {
+    jobRepository: JobRepository;
+    inputLoader: InputLoader;
+    artifactWriter: any;
+    sourceCodeEngine: AnalysisEngine;
+    documentEngine: AnalysisEngine;
+    trueDesignGenerator: DesignGenerator;
+    driftReportGenerator: DesignGenerator;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -43,7 +79,7 @@ class AnalysisOrchestrator {
     this.driftReportGenerator = driftReportGenerator;
   }
 
-  async run(payload) {
+  async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
     const currentJob = await this.jobRepository.get(payload.jobId);
     if (currentJob && currentJob.status === JobStatus.SUCCEEDED) {
       return new WorkerResult({
@@ -72,13 +108,11 @@ class AnalysisOrchestrator {
         artifactPaths,
       });
     } catch (error) {
-      await this.jobRepository.markFailed(payload.jobId, error instanceof Error ? error.message : String(error));
+      await this.jobRepository.markFailed(
+        payload.jobId,
+        error instanceof Error ? error.message : String(error),
+      );
       throw error;
     }
   }
 }
-
-module.exports = {
-  AnalysisOrchestrator,
-  WorkerResult,
-};

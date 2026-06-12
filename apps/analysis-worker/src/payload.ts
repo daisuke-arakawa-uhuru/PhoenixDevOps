@@ -1,25 +1,21 @@
-"use strict";
-
-class PayloadValidationError extends Error {
-  constructor(message) {
+export class PayloadValidationError extends Error {
+  constructor(message: string) {
     super(message);
     this.name = "PayloadValidationError";
   }
 }
 
-class StorageObjectRef {
-  constructor(bucket, objectName) {
-    this.bucket = bucket;
-    this.objectName = objectName;
-  }
+export class StorageObjectRef {
+  constructor(public bucket: string, public objectName: string) {}
 
-  static fromValue(value, fieldName) {
+  static fromValue(value: unknown, fieldName: string): StorageObjectRef {
     if (typeof value === "string") {
       return StorageObjectRef.fromUri(value, fieldName);
     }
     if (value && typeof value === "object" && !Array.isArray(value)) {
-      const bucket = readFirst(value, "bucket", "bucketName");
-      const objectName = readFirst(value, "object", "objectName", "path", "name");
+      const mapping = value as Record<string, unknown>;
+      const bucket = readFirst(mapping, "bucket", "bucketName");
+      const objectName = readFirst(mapping, "object", "objectName", "path", "name");
       if (!bucket || !objectName) {
         throw new PayloadValidationError(`${fieldName} must include bucket and object/objectName`);
       }
@@ -28,7 +24,7 @@ class StorageObjectRef {
     throw new PayloadValidationError(`${fieldName} must be a gs:// URI or object reference`);
   }
 
-  static fromUri(uri, fieldName) {
+  static fromUri(uri: string, fieldName: string): StorageObjectRef {
     if (!uri.startsWith("gs://")) {
       throw new PayloadValidationError(`${fieldName} must start with gs://`);
     }
@@ -40,12 +36,19 @@ class StorageObjectRef {
     return new StorageObjectRef(rest.slice(0, separatorIndex), rest.slice(separatorIndex + 1));
   }
 
-  get uri() {
+  get uri(): string {
     return `gs://${this.bucket}/${this.objectName}`;
   }
 }
 
-class AnalysisTaskPayload {
+export class AnalysisTaskPayload {
+  jobId: string;
+  sourceArchive: StorageObjectRef;
+  documents: readonly StorageObjectRef[];
+  projectName: string | null;
+  resultsPrefix: string | null;
+  requestedBy: string | null;
+
   constructor({
     jobId,
     sourceArchive,
@@ -53,6 +56,13 @@ class AnalysisTaskPayload {
     projectName = null,
     resultsPrefix = null,
     requestedBy = null,
+  }: {
+    jobId: string;
+    sourceArchive: StorageObjectRef;
+    documents: StorageObjectRef[];
+    projectName?: string | null;
+    resultsPrefix?: string | null;
+    requestedBy?: string | null;
   }) {
     this.jobId = jobId;
     this.sourceArchive = sourceArchive;
@@ -62,7 +72,7 @@ class AnalysisTaskPayload {
     this.requestedBy = requestedBy;
   }
 
-  static fromMapping(raw) {
+  static fromMapping(raw: unknown): AnalysisTaskPayload {
     if (raw == null) {
       throw new PayloadValidationError("JSON body is required");
     }
@@ -70,13 +80,15 @@ class AnalysisTaskPayload {
       throw new PayloadValidationError("JSON body must be an object");
     }
 
-    const jobId = readFirst(raw, "job_id", "jobId");
+    const mapping = raw as Record<string, unknown>;
+
+    const jobId = readFirst(mapping, "job_id", "jobId");
     if (!jobId) {
       throw new PayloadValidationError("job_id/jobId is required");
     }
 
     const sourceValue = readFirst(
-      raw,
+      mapping,
       "source_archive",
       "sourceArchive",
       "source_archive_uri",
@@ -86,7 +98,7 @@ class AnalysisTaskPayload {
       throw new PayloadValidationError("source_archive/sourceArchiveUri is required");
     }
 
-    const documentValues = readFirst(raw, "documents", "documentUris", "document_uris");
+    const documentValues = readFirst(mapping, "documents", "documentUris", "document_uris");
     if (documentValues == null) {
       throw new PayloadValidationError("documents/documentUris is required");
     }
@@ -99,18 +111,18 @@ class AnalysisTaskPayload {
 
     return new AnalysisTaskPayload({
       jobId: String(jobId),
-      projectName: toOptionalString(readFirst(raw, "project_name", "projectName")),
+      projectName: toOptionalString(readFirst(mapping, "project_name", "projectName")),
       sourceArchive: StorageObjectRef.fromValue(sourceValue, "source_archive"),
-      documents: documentValues.map((value, index) =>
+      documents: (documentValues as unknown[]).map((value, index) =>
         StorageObjectRef.fromValue(value, `documents[${index}]`),
       ),
-      resultsPrefix: toOptionalString(readFirst(raw, "results_prefix", "resultsPrefix")),
-      requestedBy: toOptionalString(readFirst(raw, "requested_by", "requestedBy")),
+      resultsPrefix: toOptionalString(readFirst(mapping, "results_prefix", "resultsPrefix")),
+      requestedBy: toOptionalString(readFirst(mapping, "requested_by", "requestedBy")),
     });
   }
 }
 
-function readFirst(mapping, ...keys) {
+export function readFirst(mapping: Record<string, unknown>, ...keys: string[]): unknown {
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(mapping, key)) {
       return mapping[key];
@@ -119,17 +131,10 @@ function readFirst(mapping, ...keys) {
   return undefined;
 }
 
-function toOptionalString(value) {
+function toOptionalString(value: unknown): string | null {
   if (value == null) {
     return null;
   }
   const text = String(value).trim();
   return text || null;
 }
-
-module.exports = {
-  AnalysisTaskPayload,
-  PayloadValidationError,
-  StorageObjectRef,
-  readFirst,
-};

@@ -1,6 +1,11 @@
-"use strict";
+export class WorkerConfig {
+  firestoreJobsCollection: string;
+  resultsBucket: string | null;
+  resultsPrefixTemplate: string;
+  geminiApiKey: string | null;
+  geminiModel: string;
+  geminiDryRun: boolean;
 
-class WorkerConfig {
   constructor({
     firestoreJobsCollection = "jobs",
     resultsBucket = null,
@@ -8,6 +13,13 @@ class WorkerConfig {
     geminiApiKey = null,
     geminiModel = "gemini-2.0-flash",
     geminiDryRun = false,
+  }: {
+    firestoreJobsCollection?: string;
+    resultsBucket?: string | null;
+    resultsPrefixTemplate?: string;
+    geminiApiKey?: string | null;
+    geminiModel?: string;
+    geminiDryRun?: boolean;
   } = {}) {
     this.firestoreJobsCollection = firestoreJobsCollection;
     this.resultsBucket = resultsBucket;
@@ -17,7 +29,7 @@ class WorkerConfig {
     this.geminiDryRun = geminiDryRun;
   }
 
-  static fromEnv(env = process.env) {
+  static fromEnv(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
     return new WorkerConfig({
       firestoreJobsCollection: env.FIRESTORE_JOBS_COLLECTION || "jobs",
       resultsBucket: env.RESULTS_BUCKET || null,
@@ -28,7 +40,3 @@ class WorkerConfig {
     });
   }
 }
-
-module.exports = {
-  WorkerConfig,
-};

@@ -1,6 +1,21 @@
-"use strict";
+import { AnalysisTaskPayload } from "./payload.js";
 
-function buildSourceAnalysisPrompt(payload, inputs, staticOverviewMarkdown = "") {
+export interface AnalysisInput {
+  sourceArchiveUri: string;
+  sourceFiles: Array<{ path: string; content: string }>;
+  documentUris: string[];
+  documentFiles: Array<{ path: string; content: string }>;
+}
+
+export interface SpecificationResult {
+  summary: string;
+}
+
+export function buildSourceAnalysisPrompt(
+  payload: AnalysisTaskPayload,
+  inputs: AnalysisInput,
+  staticOverviewMarkdown: string = "",
+): string {
   return [
     "[TASK: SOURCE_ANALYSIS]",
     "",
@@ -37,7 +52,11 @@ function buildSourceAnalysisPrompt(payload, inputs, staticOverviewMarkdown = "")
   ].join("\n");
 }
 
-function buildDocumentExtractionPrompt(payload, inputs, documentOverviewMarkdown = "") {
+export function buildDocumentExtractionPrompt(
+  payload: AnalysisTaskPayload,
+  inputs: AnalysisInput,
+  documentOverviewMarkdown: string = "",
+): string {
   return [
     "[TASK: DOCUMENT_EXTRACTION]",
     "",
@@ -68,7 +87,11 @@ function buildDocumentExtractionPrompt(payload, inputs, documentOverviewMarkdown
   ].join("\n");
 }
 
-function buildTrueDesignPrompt(payload, sourceSpecification, documentSpecification) {
+export function buildTrueDesignPrompt(
+  payload: AnalysisTaskPayload,
+  sourceSpecification: SpecificationResult,
+  documentSpecification: SpecificationResult,
+): string {
   return [
     "[TASK: TRUE_DESIGN]",
     "",
@@ -101,7 +124,11 @@ function buildTrueDesignPrompt(payload, sourceSpecification, documentSpecificati
   ].join("\n");
 }
 
-function buildDriftReportPrompt(payload, sourceSpecification, documentSpecification) {
+export function buildDriftReportPrompt(
+  payload: AnalysisTaskPayload,
+  sourceSpecification: SpecificationResult,
+  documentSpecification: SpecificationResult,
+): string {
   return [
     "[TASK: DRIFT_REPORT]",
     "",
@@ -134,16 +161,9 @@ function buildDriftReportPrompt(payload, sourceSpecification, documentSpecificat
   ].join("\n");
 }
 
-function formatTextFiles(files) {
+function formatTextFiles(files: Array<{ path: string; content: string }>): string {
   const blocks = files.map((file) =>
     [`### ${file.path}`, "", "```text", file.content, "```"].join("\n"),
   );
   return blocks.length === 0 ? "入力ファイル本文はまだ取得されていません。" : blocks.join("\n\n");
 }
-
-module.exports = {
-  buildDocumentExtractionPrompt,
-  buildDriftReportPrompt,
-  buildSourceAnalysisPrompt,
-  buildTrueDesignPrompt,
-};

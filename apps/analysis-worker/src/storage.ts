@@ -1,8 +1,9 @@
-"use strict";
-
-const fs = require("node:fs");
-const path = require("node:path");
-const { readZipEntries } = require("./zip");
+import fs from "node:fs";
+import path from "node:path";
+import { readZipEntries } from "./zip.js";
+import { Storage } from "@google-cloud/storage";
+import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
+import pdfParse from "pdf-parse";
 
 const SKIPPED_DIRS = new Set([
   ".git",
@@ -49,8 +50,19 @@ const TEXT_EXTENSIONS = new Set([
   ".yml",
 ]);
 
-class ReferenceOnlyInputLoader {
-  async load(payload) {
+export interface LoadedInputs {
+  sourceArchiveUri: string;
+  documentUris: string[];
+  sourceFiles: Array<{ path: string; content: string }>;
+  documentFiles: Array<{ path: string; content: string }>;
+}
+
+export interface InputLoader {
+  load(payload: AnalysisTaskPayload): Promise<LoadedInputs>;
+}
+
+export class ReferenceOnlyInputLoader implements InputLoader {
+  async load(payload: AnalysisTaskPayload): Promise<LoadedInputs> {
     return {
       sourceArchiveUri: payload.sourceArchive.uri,
       documentUris: payload.documents.map((document) => document.uri),
@@ -60,25 +72,33 @@ class ReferenceOnlyInputLoader {
   }
 }
 
-class GcsInputLoader {
-  constructor({ storageClient = null, maxFiles = 80, maxCharsPerFile = 12000 } = {}) {
-    if (storageClient == null) {
-      const { Storage } = require("@google-cloud/storage");
-      storageClient = new Storage();
-    }
-    this.storageClient = storageClient;
+export class GcsInputLoader implements InputLoader {
+  private storageClient: Storage;
+  private maxFiles: number;
+  private maxCharsPerFile: number;
+
+  constructor({
+    storageClient = null,
+    maxFiles = 80,
+    maxCharsPerFile = 12000,
+  }: {
+    storageClient?: Storage | null;
+    maxFiles?: number;
+    maxCharsPerFile?: number;
+  } = {}) {
+    this.storageClient = storageClient || new Storage();
     this.maxFiles = maxFiles;
     this.maxCharsPerFile = maxCharsPerFile;
   }
 
-  async load(payload) {
+  async load(payload: AnalysisTaskPayload): Promise<LoadedInputs> {
     const sourceData = await downloadStorageObject(this.storageClient, payload.sourceArchive);
     const sourceFiles = limitFiles(
       readSourceObject(payload.sourceArchive.objectName, sourceData, this.maxCharsPerFile),
       this.maxFiles,
     );
 
-    const documentFiles = [];
+    const documentFiles: Array<{ path: string; content: string }> = [];
     for (const document of payload.documents) {
       const documentData = await downloadStorageObject(this.storageClient, document);
       documentFiles.push(
@@ -101,40 +121,67 @@ class GcsInputLoader {
   }
 }
 
-class LocalFileInputLoader {
-  constructor(sourcePath, documentPaths, { maxFiles = 80, maxCharsPerFile = 12000 } = {}) {
+export class LocalFileInputLoader implements InputLoader {
+  private sourcePath: string;
+  private documentPaths: string[];
+  private maxFiles: number;
+  private maxCharsPerFile: number;
+
+  constructor(
+    sourcePath: string,
+    documentPaths: string[],
+    { maxFiles = 80, maxCharsPerFile = 12000 } = {},
+  ) {
     this.sourcePath = sourcePath;
     this.documentPaths = [...documentPaths];
     this.maxFiles = maxFiles;
     this.maxCharsPerFile = maxCharsPerFile;
   }
 
-  async load() {
+  async load(): Promise<LoadedInputs> {
     return {
       sourceArchiveUri: this.sourcePath,
       documentUris: this.documentPaths,
       sourceFiles: limitFiles(readSourceFiles(this.sourcePath, this.maxCharsPerFile), this.maxFiles),
-      documentFiles: limitFiles(await readDocumentFiles(this.documentPaths, this.maxCharsPerFile), this.maxFiles),
+      documentFiles: limitFiles(
+        await readDocumentFiles(this.documentPaths, this.maxCharsPerFile),
+        this.maxFiles,
+      ),
     };
   }
 }
 
-class GcsArtifactWriter {
-  constructor({ storageClient = null, resultsBucket = null, resultsPrefixTemplate = "results/{job_id}" } = {}) {
-    if (storageClient == null) {
-      const { Storage } = require("@google-cloud/storage");
-      storageClient = new Storage();
-    }
-    this.storageClient = storageClient;
+export interface ArtifactWriter {
+  write(payload: AnalysisTaskPayload, markdownFiles: Record<string, string>): Promise<Record<string, string>>;
+}
+
+export class GcsArtifactWriter implements ArtifactWriter {
+  private storageClient: Storage;
+  private resultsBucket: string | null;
+  private resultsPrefixTemplate: string;
+
+  constructor({
+    storageClient = null,
+    resultsBucket = null,
+    resultsPrefixTemplate = "results/{job_id}",
+  }: {
+    storageClient?: Storage | null;
+    resultsBucket?: string | null;
+    resultsPrefixTemplate?: string;
+  } = {}) {
+    this.storageClient = storageClient || new Storage();
     this.resultsBucket = resultsBucket;
     this.resultsPrefixTemplate = resultsPrefixTemplate;
   }
 
-  async write(payload, markdownFiles) {
+  async write(
+    payload: AnalysisTaskPayload,
+    markdownFiles: Record<string, string>,
+  ): Promise<Record<string, string>> {
     const bucketName = this.resultsBucket || payload.sourceArchive.bucket;
     const bucket = this.storageClient.bucket(bucketName);
     const prefix = this.resultPrefix(payload);
-    const artifactPaths = {};
+    const artifactPaths: Record<string, string> = {};
 
     for (const [fileName, content] of Object.entries(markdownFiles)) {
       const objectName = `${prefix}/${fileName}`;
@@ -147,20 +194,20 @@ class GcsArtifactWriter {
     return artifactPaths;
   }
 
-  resultPrefix(payload) {
-    return (payload.resultsPrefix || this.resultsPrefixTemplate.replaceAll("{job_id}", payload.jobId)).replace(
-      /^\/+|\/+$/g,
-      "",
-    );
+  private resultPrefix(payload: AnalysisTaskPayload): string {
+    return (
+      payload.resultsPrefix || this.resultsPrefixTemplate.replaceAll("{job_id}", payload.jobId)
+    ).replace(/^\/+|\/+$/g, "");
   }
 }
 
-class InMemoryArtifactWriter {
-  constructor() {
-    this.filesByJobId = {};
-  }
+export class InMemoryArtifactWriter implements ArtifactWriter {
+  public filesByJobId: Record<string, Record<string, string>> = {};
 
-  async write(payload, markdownFiles) {
+  async write(
+    payload: AnalysisTaskPayload,
+    markdownFiles: Record<string, string>,
+  ): Promise<Record<string, string>> {
     this.filesByJobId[payload.jobId] = { ...markdownFiles };
     const prefix = (payload.resultsPrefix || `results/${payload.jobId}`).replace(/^\/+|\/+$/g, "");
     return Object.fromEntries(
@@ -169,15 +216,16 @@ class InMemoryArtifactWriter {
   }
 }
 
-class LocalArtifactWriter {
-  constructor(outputDir) {
-    this.outputDir = outputDir;
-  }
+export class LocalArtifactWriter implements ArtifactWriter {
+  constructor(private outputDir: string) {}
 
-  async write(payload, markdownFiles) {
+  async write(
+    payload: AnalysisTaskPayload,
+    markdownFiles: Record<string, string>,
+  ): Promise<Record<string, string>> {
     const jobOutputDir = path.join(this.outputDir, payload.jobId);
     fs.mkdirSync(jobOutputDir, { recursive: true });
-    const artifactPaths = {};
+    const artifactPaths: Record<string, string> = {};
 
     for (const [fileName, content] of Object.entries(markdownFiles)) {
       const filePath = path.join(jobOutputDir, fileName);
@@ -189,7 +237,7 @@ class LocalArtifactWriter {
   }
 }
 
-function readSourceFiles(sourcePath, maxCharsPerFile) {
+function readSourceFiles(sourcePath: string, maxCharsPerFile: number): Array<{ path: string; content: string }> {
   if (fs.statSync(sourcePath).isDirectory()) {
     return walkFiles(sourcePath)
       .filter((filePath) => !shouldSkip(relativeParts(sourcePath, filePath)))
@@ -200,7 +248,7 @@ function readSourceFiles(sourcePath, maxCharsPerFile) {
         }
         return { path: normalizePath(path.relative(sourcePath, filePath)), content: text };
       })
-      .filter(Boolean);
+      .filter((f): f is { path: string; content: string } => f !== null);
   }
 
   if (path.extname(sourcePath).toLowerCase() === ".zip") {
@@ -211,8 +259,11 @@ function readSourceFiles(sourcePath, maxCharsPerFile) {
   return text == null ? [] : [{ path: path.basename(sourcePath), content: text }];
 }
 
-async function readDocumentFiles(documentPaths, maxCharsPerFile) {
-  const files = [];
+async function readDocumentFiles(
+  documentPaths: string[],
+  maxCharsPerFile: number,
+): Promise<Array<{ path: string; content: string }>> {
+  const files: Array<{ path: string; content: string }> = [];
   for (const documentPath of documentPaths) {
     if (fs.statSync(documentPath).isDirectory()) {
       for (const childPath of walkFiles(documentPath)) {
@@ -227,7 +278,10 @@ async function readDocumentFiles(documentPaths, maxCharsPerFile) {
   return files;
 }
 
-async function readDocumentPath(documentPath, maxCharsPerFile) {
+async function readDocumentPath(
+  documentPath: string,
+  maxCharsPerFile: number,
+): Promise<Array<{ path: string; content: string }>> {
   const suffix = path.extname(documentPath).toLowerCase();
   if (suffix === ".zip") {
     return readZipTextFiles(fs.readFileSync(documentPath), maxCharsPerFile);
@@ -261,7 +315,11 @@ async function readDocumentPath(documentPath, maxCharsPerFile) {
   ];
 }
 
-function readSourceObject(objectName, data, maxCharsPerFile) {
+export function readSourceObject(
+  objectName: string,
+  data: Buffer | Uint8Array,
+  maxCharsPerFile: number,
+): Array<{ path: string; content: string }> {
   const suffix = path.extname(objectName).toLowerCase();
   if (suffix === ".zip") {
     return readZipTextFiles(data, maxCharsPerFile);
@@ -273,7 +331,11 @@ function readSourceObject(objectName, data, maxCharsPerFile) {
   return [];
 }
 
-async function readDocumentObject(objectName, data, maxCharsPerFile) {
+export async function readDocumentObject(
+  objectName: string,
+  data: Buffer | Uint8Array,
+  maxCharsPerFile: number,
+): Promise<Array<{ path: string; content: string }>> {
   const suffix = path.extname(objectName).toLowerCase();
   if (suffix === ".zip") {
     return readZipTextFiles(data, maxCharsPerFile, objectName);
@@ -298,8 +360,12 @@ async function readDocumentObject(objectName, data, maxCharsPerFile) {
   ];
 }
 
-function readZipTextFiles(data, maxCharsPerFile, pathPrefix = null) {
-  const files = [];
+function readZipTextFiles(
+  data: Buffer | Uint8Array,
+  maxCharsPerFile: number,
+  pathPrefix: string | null = null,
+): Array<{ path: string; content: string }> {
+  const files: Array<{ path: string; content: string }> = [];
   for (const entry of readZipEntries(data)) {
     const entryParts = entry.name.split("/");
     if (shouldSkip(entryParts)) {
@@ -320,15 +386,15 @@ function readZipTextFiles(data, maxCharsPerFile, pathPrefix = null) {
   return files;
 }
 
-function limitFiles(files, maxFiles) {
+function limitFiles<T>(files: T[], maxFiles: number): T[] {
   if (maxFiles <= 0) {
     return [];
   }
   return files.slice(0, maxFiles);
 }
 
-function walkFiles(rootPath) {
-  const results = [];
+function walkFiles(rootPath: string): string[] {
+  const results: string[] = [];
   for (const name of fs.readdirSync(rootPath).sort()) {
     const childPath = path.join(rootPath, name);
     const stats = fs.statSync(childPath);
@@ -341,7 +407,7 @@ function walkFiles(rootPath) {
   return results;
 }
 
-function readText(filePath, maxCharsPerFile) {
+function readText(filePath: string, maxCharsPerFile: number): string | null {
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     return null;
   }
@@ -352,7 +418,7 @@ function readText(filePath, maxCharsPerFile) {
   return decodeUtf8(data, maxCharsPerFile);
 }
 
-function decodeUtf8(data, maxCharsPerFile) {
+function decodeUtf8(data: Buffer | Uint8Array, maxCharsPerFile: number): string | null {
   try {
     return truncate(Buffer.from(data).toString("utf8"), maxCharsPerFile);
   } catch {
@@ -360,40 +426,35 @@ function decodeUtf8(data, maxCharsPerFile) {
   }
 }
 
-async function downloadStorageObject(storageClient, ref) {
+async function downloadStorageObject(storageClient: Storage, ref: StorageObjectRef): Promise<Buffer> {
   const file = storageClient.bucket(ref.bucket).file(ref.objectName);
   const result = await file.download();
   return Array.isArray(result) ? result[0] : result;
 }
 
-async function extractPdfTextFromBytes(data, maxChars) {
-  let pdfParse;
+async function extractPdfTextFromBytes(data: Buffer | Uint8Array, maxChars: number): Promise<string> {
   try {
-    pdfParse = require("pdf-parse");
-  } catch {
-    return "[PDF本文抽出には pdf-parse が必要です]";
-  }
-
-  try {
-    const parsed = await pdfParse(data);
+    const parsed = await pdfParse(Buffer.from(data));
     const text = String(parsed.text || "").trim();
     return text ? truncate(text, maxChars) : "[PDFからテキストを抽出できませんでした]";
-  } catch {
+  } catch (err) {
     return "[PDFからテキストを抽出できませんでした]";
   }
 }
 
-function extractXlsxTextFromBytes(data, maxChars) {
+export function extractXlsxTextFromBytes(data: Buffer | Uint8Array, maxChars: number): string {
   try {
-    const entries = new Map(readZipEntries(data).map((entry) => [entry.name, entry.data.toString("utf8")]));
+    const entries = new Map(
+      readZipEntries(data).map((entry) => [entry.name, entry.data.toString("utf8")]),
+    );
     const sharedStrings = readXlsxSharedStrings(entries.get("xl/sharedStrings.xml") || "");
     const worksheetNames = [...entries.keys()]
       .filter((name) => name.startsWith("xl/worksheets/") && name.endsWith(".xml"))
       .sort();
-    const blocks = [];
+    const blocks: string[] = [];
 
     for (const worksheetName of worksheetNames) {
-      const rows = readXlsxWorksheetRows(entries.get(worksheetName), sharedStrings);
+      const rows = readXlsxWorksheetRows(entries.get(worksheetName) || "", sharedStrings);
       if (rows.length > 0) {
         blocks.push([`## ${worksheetName}`, ...rows.map((row) => row.join("\t"))].join("\n"));
       }
@@ -411,7 +472,7 @@ function extractXlsxTextFromBytes(data, maxChars) {
   }
 }
 
-function readXlsxSharedStrings(xml) {
+function readXlsxSharedStrings(xml: string): string[] {
   if (!xml) {
     return [];
   }
@@ -422,13 +483,13 @@ function readXlsxSharedStrings(xml) {
   );
 }
 
-function readXlsxWorksheetRows(xml, sharedStrings) {
+function readXlsxWorksheetRows(xml: string, sharedStrings: string[]): string[][] {
   if (!xml) {
     return [];
   }
-  const rows = [];
+  const rows: string[][] = [];
   for (const rowMatch of xml.matchAll(/<row\b[\s\S]*?<\/row>/g)) {
-    const values = [];
+    const values: string[] = [];
     for (const cellMatch of rowMatch[0].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
       values.push(readXlsxCellValue(cellMatch[1], cellMatch[2], sharedStrings));
     }
@@ -439,7 +500,7 @@ function readXlsxWorksheetRows(xml, sharedStrings) {
   return rows;
 }
 
-function readXlsxCellValue(attributes, body, sharedStrings) {
+function readXlsxCellValue(attributes: string, body: string, sharedStrings: string[]): string {
   const inlineText = body.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/);
   if (attributes.includes('t="inlineStr"') && inlineText) {
     return decodeXmlEntities(inlineText[1]);
@@ -457,7 +518,7 @@ function readXlsxCellValue(attributes, body, sharedStrings) {
   return rawValue;
 }
 
-function decodeXmlEntities(value) {
+function decodeXmlEntities(value: string): string {
   return value
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
@@ -466,30 +527,18 @@ function decodeXmlEntities(value) {
     .replaceAll("&apos;", "'");
 }
 
-function truncate(text, maxChars) {
+function truncate(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`;
 }
 
-function shouldSkip(parts) {
+function shouldSkip(parts: string[]): boolean {
   return parts.some((part) => SKIPPED_DIRS.has(part));
 }
 
-function relativeParts(rootPath, filePath) {
+function relativeParts(rootPath: string, filePath: string): string[] {
   return normalizePath(path.relative(rootPath, filePath)).split("/");
 }
 
-function normalizePath(value) {
+function normalizePath(value: string): string {
   return value.split(path.sep).join("/");
 }
-
-module.exports = {
-  GcsArtifactWriter,
-  GcsInputLoader,
-  InMemoryArtifactWriter,
-  LocalArtifactWriter,
-  LocalFileInputLoader,
-  ReferenceOnlyInputLoader,
-  extractXlsxTextFromBytes,
-  readDocumentObject,
-  readSourceObject,
-};
