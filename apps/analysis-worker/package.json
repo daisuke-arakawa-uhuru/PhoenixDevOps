@@ -7,6 +7,7 @@
   "main": "dist/src/index.js",
   "scripts": {
     "build": "tsc",
+    "gcp-build": "npm run build",
     "start": "functions-framework --target=runAnalysisWorker",
     "test": "node --test",
     "local": "tsx src/local-runner.ts",

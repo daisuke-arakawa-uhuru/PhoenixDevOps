@@ -98,6 +98,9 @@ node src/local-runner.js \
 
 ## Cloud Functions デプロイ例
 
+Terraform では [infra/terraform/modules/analysis_worker](../../infra/terraform/modules/analysis_worker) が
+この構成を管理します。手動デプロイで動作確認する場合の同等コマンドは以下です。
+
 ```bash
 gcloud functions deploy analysis-worker \
   --gen2 \
