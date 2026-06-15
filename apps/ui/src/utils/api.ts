@@ -30,15 +30,45 @@ export interface ResultsResponse {
   artifacts: Artifact[];
 }
 
-// Configuration
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/\/$/, '');
-export const isMockMode = () => {
-  return (
-    import.meta.env.VITE_USE_MOCK === 'true' ||
-    window.location.search.includes('mock=true') ||
-    window.location.hostname === 'localhost' && !import.meta.env.VITE_API_URL
-  );
+type RuntimeConfig = {
+  API_URL?: string;
+  USE_MOCK?: boolean | string;
 };
+
+declare global {
+  interface Window {
+    __PHOENIX_CONFIG__?: RuntimeConfig;
+  }
+}
+
+// Configuration
+export const API_BASE_URL = readConfigText('API_URL', import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/\/$/, '');
+export const isMockMode = () => {
+  const mockParam = new URLSearchParams(window.location.search).get('mock');
+  if (mockParam != null) {
+    return ['1', 'true', 'yes'].includes(mockParam.toLowerCase());
+  }
+  const runtimeMock = readRuntimeConfig().USE_MOCK;
+  if (typeof runtimeMock === 'boolean') {
+    return runtimeMock;
+  }
+  if (typeof runtimeMock === 'string') {
+    return ['1', 'true', 'yes'].includes(runtimeMock.toLowerCase());
+  }
+  return import.meta.env.VITE_USE_MOCK === 'true';
+};
+
+function readRuntimeConfig(): RuntimeConfig {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  return window.__PHOENIX_CONFIG__ || {};
+}
+
+function readConfigText(key: keyof RuntimeConfig, fallback: string): string {
+  const value = readRuntimeConfig()[key];
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
 
 // Stateful memory for mockup jobs
 interface MockJobState {
@@ -95,14 +125,13 @@ export async function uploadFiles(
     formData.append('projectName', projectName);
   }
 
-  const response = await fetch(`${API_URL}/upload`, {
+  const response = await fetch(`${API_BASE_URL}/upload`, {
     method: 'POST',
     body: formData,
   });
 
   if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.message || `Upload failed with status ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `Upload failed with status ${response.status}`));
   }
 
   return response.json();
@@ -133,15 +162,14 @@ export async function createJob(uploadId: string, projectName?: string): Promise
     };
   }
 
-  const response = await fetch(`${API_URL}/jobs`, {
+  const response = await fetch(`${API_BASE_URL}/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ uploadId }),
   });
 
   if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.message || `Failed to create job: ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `Failed to create job: ${response.status}`));
   }
 
   return response.json();
@@ -195,14 +223,13 @@ export async function getJobStatus(jobId: string): Promise<JobResponse> {
     return res;
   }
 
-  const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
     method: 'GET',
     headers: { 'Accept': 'application/json' },
   });
 
   if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.message || `Failed to get job status: ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `Failed to get job status: ${response.status}`));
   }
 
   return response.json();
@@ -233,14 +260,13 @@ export async function getJobResults(jobId: string): Promise<ResultsResponse> {
     };
   }
 
-  const response = await fetch(`${API_URL}/jobs/${jobId}/results`, {
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/results`, {
     method: 'GET',
     headers: { 'Accept': 'application/json' },
   });
 
   if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.message || `Failed to fetch results: ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `Failed to fetch results: ${response.status}`));
   }
 
   return response.json();
@@ -265,6 +291,21 @@ export async function fetchFileContent(url: string): Promise<string> {
     throw new Error(`Failed to fetch file content: ${response.statusText}`);
   }
   return response.text();
+}
+
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  const errorBody = await response.json().catch(() => null);
+  if (errorBody && typeof errorBody === 'object') {
+    const message = (errorBody as { message?: unknown; error?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+    const code = (errorBody as { error?: unknown }).error;
+    if (typeof code === 'string' && code.trim()) {
+      return `${fallback} (${code})`;
+    }
+  }
+  return fallback;
 }
 
 // --- Mock Data Constants ---

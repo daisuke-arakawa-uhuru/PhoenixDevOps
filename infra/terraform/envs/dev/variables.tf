@@ -242,3 +242,33 @@ variable "gemini_api_key_secret_version" {
   type        = string
   default     = "latest"
 }
+
+variable "ui_bucket_name" {
+  description = "Web UI 静的ホスティング用 GCS バケット名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "ui_force_destroy" {
+  description = "true の場合、中身があっても UI hosting bucket を削除可能にする。本番相当では false 固定。"
+  type        = bool
+  default     = false
+}
+
+variable "ui_allow_public_access" {
+  description = "true の場合、Web UI の静的ファイルを allUsers に公開する"
+  type        = bool
+  default     = true
+}
+
+variable "ui_deploy_dist" {
+  description = "true の場合、apps/ui/dist 配下の build 成果物を UI hosting bucket にアップロードする"
+  type        = bool
+  default     = true
+}
+
+variable "ui_use_mock" {
+  description = "配信環境の Web UI をモックモードで動作させるか"
+  type        = bool
+  default     = false
+}

@@ -102,3 +102,22 @@ module "api" {
     module.analysis_worker,
   ]
 }
+
+# === Cloud Storage static website: Web UI ===
+# Vite の .env は build-time 固定のため、デプロイ後に API URL を差し替えられるよう
+# Terraform が config.js を生成し、ブラウザ実行時に読み込ませる。
+module "ui_hosting" {
+  source = "../../modules/ui_hosting"
+
+  project_id          = var.project_id
+  bucket_name         = coalesce(var.ui_bucket_name, "${local.name_prefix}-ui")
+  location            = var.storage_location
+  force_destroy       = var.ui_force_destroy
+  allow_public_access = var.ui_allow_public_access
+
+  dist_dir    = abspath("${path.root}/../../../../apps/ui/dist")
+  deploy_dist = var.ui_deploy_dist
+
+  api_url  = module.api.function_uri
+  use_mock = var.ui_use_mock
+}

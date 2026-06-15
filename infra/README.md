@@ -9,11 +9,12 @@ PhoenixDevOps の GCP リソースを Terraform で管理します。**コンソ
 
 | 領域 | リソース | モジュール |
 | --- | --- | --- |
-| Cloud Storage | `*-assets` バケット（`uploads/` `results/` プレフィックス） | [modules/storage](terraform/modules/storage) |
+| Cloud Storage | `*-assets` バケット（`uploads/` `results/` プレフィックス、成果物プレビュー用 CORS） | [modules/storage](terraform/modules/storage) |
 | Cloud Tasks | 解析ジョブキュー `analysis-job-queue` | [modules/tasks](terraform/modules/tasks) |
 | Firestore | `(default)` DB + `jobs` 複合インデックス | [modules/firestore](terraform/modules/firestore) |
 | Cloud Functions | HTTP API `*-api` + 実行 SA | [modules/api](terraform/modules/api) |
 | Cloud Functions | 解析ワーカー `*-analysis-worker` + 実行/呼び出し SA | [modules/analysis_worker](terraform/modules/analysis_worker) |
+| Cloud Storage static website | Web UI hosting `*-ui` バケット + runtime config `config.js` | [modules/ui_hosting](terraform/modules/ui_hosting) |
 
 > Firestore の `jobs` コレクション設計は [documents/design/firestore-jobs.md](../documents/design/firestore-jobs.md) を参照。
 > GCP プロジェクト本体・API 有効化・Gemini/Secret Manager は **山本担当**（別途）。
@@ -27,6 +28,7 @@ infra/terraform/
 │   ├── tasks/
 │   ├── api/
 │   ├── analysis_worker/
+│   ├── ui_hosting/
 │   └── firestore/
 └── envs/
     └── dev/            # dev 環境のルート（モジュールを束ねる）
@@ -123,6 +125,32 @@ API 実行 SA には以下を付与します。
 - 署名付き URL 発行用に API SA 自身への `roles/iam.serviceAccountTokenCreator`
 
 dev では `api_allow_unauthenticated = true` とし、Cloud Functions/Cloud Run invoker を `allUsers` に付与します。
+
+UI は `GET /jobs/{jobId}/results` で受け取った署名付き GCS URL をブラウザから `fetch` して Markdown を
+プレビューします。そのため [modules/storage](terraform/modules/storage) の assets bucket には、
+`GET` / `HEAD` の CORS を Terraform で設定します。CORS はブラウザからの読み取りを許可するだけで、
+オブジェクト公開は `public_access_prevention = "enforced"` と IAM / 署名付き URL によって引き続き制御します。
+
+### Web UI hosting のデプロイ設定
+
+Web UI は [modules/ui_hosting](terraform/modules/ui_hosting) で Cloud Storage static website として管理します。
+Terraform output の `ui_hosting_website_url` または `ui_hosting_index_url` がアクセス URL です。
+
+Vite の `.env` は build-time に固定されるため、デプロイ環境では Terraform が `config.js` を生成し、
+`module.api.function_uri` を `window.__PHOENIX_CONFIG__.API_URL` として配信します。これにより、UI build 後でも
+HTTP API URL を Terraform state に合わせて差し替えられます。
+
+Terraform plan/apply workflow は `apps/ui` を build してから plan/apply します。ローカルで UI hosting まで
+plan/apply する場合も、事前に以下を実行して `apps/ui/dist` を作成してください。
+
+```bash
+cd apps/ui
+npm ci
+npm run build
+```
+
+`ui_deploy_dist = false` を指定すると、hosting bucket と `config.js` だけを Terraform 管理し、静的ファイルの
+アップロードは行いません。
 
 ## CI のゲート（重要）
 

@@ -67,3 +67,23 @@ output "api_service_account_email" {
   description = "HTTP API 実行用サービスアカウント"
   value       = module.api.service_account_email
 }
+
+output "ui_hosting_bucket_name" {
+  description = "Web UI 静的ホスティング用 GCS バケット名"
+  value       = module.ui_hosting.bucket_name
+}
+
+output "ui_hosting_website_url" {
+  description = "Web UI の GCS website endpoint URL"
+  value       = module.ui_hosting.website_url
+}
+
+output "ui_hosting_index_url" {
+  description = "Web UI の index.html 直リンク"
+  value       = module.ui_hosting.index_url
+}
+
+output "ui_runtime_config_object_name" {
+  description = "Terraform が生成する Web UI runtime config JavaScript"
+  value       = module.ui_hosting.runtime_config_object_name
+}

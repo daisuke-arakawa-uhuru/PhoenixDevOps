@@ -37,3 +37,15 @@ variable "archived_versions_to_keep" {
   type        = number
   default     = 3
 }
+
+variable "cors_origins" {
+  description = "署名付き URL のブラウザプレビューを許可する Origin 一覧。空配列で CORS を無効化"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_max_age_seconds" {
+  description = "GCS CORS preflight のキャッシュ秒数"
+  type        = number
+  default     = 3600
+}

@@ -130,14 +130,14 @@ resource "google_cloudfunctions2_function" "worker" {
   }
 
   service_config {
-    available_memory                = var.available_memory
-    timeout_seconds                 = var.timeout_seconds
-    min_instance_count              = var.min_instance_count
-    max_instance_count              = var.max_instance_count
+    available_memory                 = var.available_memory
+    timeout_seconds                  = var.timeout_seconds
+    min_instance_count               = var.min_instance_count
+    max_instance_count               = var.max_instance_count
     max_instance_request_concurrency = var.max_instance_request_concurrency
-    ingress_settings                = var.ingress_settings
-    all_traffic_on_latest_revision  = true
-    service_account_email           = google_service_account.worker.email
+    ingress_settings                 = var.ingress_settings
+    all_traffic_on_latest_revision   = true
+    service_account_email            = google_service_account.worker.email
 
     environment_variables = {
       FIRESTORE_JOBS_COLLECTION = var.firestore_jobs_collection

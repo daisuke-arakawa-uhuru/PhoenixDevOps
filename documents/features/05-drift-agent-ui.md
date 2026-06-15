@@ -194,6 +194,13 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
   * UIは返却された各 `url`（署名付きURL）に対してブラウザから `fetch` を実行し、Markdownの生テキストデータを取得する。
   * 取得した生テキストを画面上のMarkdownプレビュー領域に渡し、HTMLとしてレンダリングする。
   * ダウンロード時は、この `url` を `<a>` タグの `href` に設定し、`download` 属性を指定してダウンロードさせる。
+  * 成果物保存先のCloud Storageバケットは、署名付きURLのMarkdownプレビュー用に `GET` / `HEAD` のCORSを許可する。
+
+### 4.4. デプロイ環境の設定
+
+* Web UIはTerraform管理のCloud Storage static websiteとしてホスティングする。
+* デプロイ環境のAPI URLは、Viteのbuild-time `.env` ではなく、Terraformが生成する `/config.js` に設定する。
+* `/config.js` は `window.__PHOENIX_CONFIG__.API_URL` としてHTTP APIのURLを公開し、UIはこれを優先して参照する。
 
 ---
 

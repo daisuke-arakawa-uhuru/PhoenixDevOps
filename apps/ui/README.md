@@ -25,9 +25,28 @@ npm run dev
 
 ---
 
+## 🔌 実 API 連携
+
+通常起動では、UI は Issue #3 の HTTP API を呼び出します。API は Cloud Tasks 経由で Issue #4 の解析ワーカーを起動するため、UI からは次の流れで実処理を呼び出します。
+
+```text
+UI -> POST /upload -> POST /jobs -> GET /jobs/{jobId} -> GET /jobs/{jobId}/results
+       Issue #3 HTTP API -------------------------------------------> Issue #4 worker results
+```
+
+ローカル API はデフォルトで `http://localhost:8080` を参照します。デプロイ済み API を使うローカル確認では、Terraform output の `api_function_uri` を `VITE_API_URL` に設定してください。
+
+```bash
+VITE_API_URL="https://<api-function-url>" npm run dev
+```
+
+Terraform でホスティングする環境では、`VITE_API_URL` ではなく Terraform が配信する `/config.js` の
+`window.__PHOENIX_CONFIG__.API_URL` を使用します。`config.js` は `infra/terraform/modules/ui_hosting` で生成され、
+値には dev 環境の `module.api.function_uri` が入ります。
+
 ## 🧪 モック検証モード（API不要での確認）
 
-実際のバックエンドAPIサーバー（Cloud Functions）が起動していない状態でも、UIの挙動やデザインを確認するための**モックモード**が搭載されています。
+実際のバックエンドAPIサーバー（Cloud Functions）が起動していない状態でUIの挙動やデザインを確認する場合は、**モックモード**を明示的に有効化します。
 
 ### 使用方法
 ブラウザで起動したURLの末尾に、クエリパラメータ **`?mock=true`** を追加してアクセスします。
@@ -48,6 +67,10 @@ npm run dev
 | --- | --- | --- |
 | `VITE_API_URL` | `http://localhost:8080` | バックエンドCloud Functions (HTTP API) のエンドポイント。 |
 | `VITE_USE_MOCK` | `false` | `true` に設定すると、クエリパラメータ `?mock=true` が無くても常にモックモードで動作します。 |
+
+通常のローカル起動では `VITE_USE_MOCK` を設定しなければ実 API を呼び出します。APIなしでUIだけを確認したい場合は、`?mock=true` または `VITE_USE_MOCK=true` を使ってください。
+
+デプロイ環境の実 API URL は `.env` ではなく、Terraform が hosting bucket に配置する `config.js` で設定します。
 
 ---
 
