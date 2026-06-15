@@ -135,6 +135,8 @@ UI は `GET /jobs/{jobId}/results` で受け取った署名付き GCS URL をブ
 
 Web UI は [modules/ui_hosting](terraform/modules/ui_hosting) で Cloud Functions Gen2 として管理します。
 Terraform output の `ui_function_uri` または互換用の `ui_hosting_website_url` がアクセス URL です。
+Cloud Functions のトリガー URL（`https://<region>-<project>.cloudfunctions.net/<function-name>`）から直接開いた場合も、
+UI 関数が `UI_BASE_PATH` を使って `/assets/...` と `/config.js` の参照先を関数配下へ補正します。
 
 Cloud Functions Gen2 は内部的に Cloud Run service を作成します。dev では UI の静的 assets を並列配信できるよう
 `ui_available_cpu = "1"`、`ui_max_instance_request_concurrency = 80` を明示します。Cloud Run は CPU が 1 未満の場合

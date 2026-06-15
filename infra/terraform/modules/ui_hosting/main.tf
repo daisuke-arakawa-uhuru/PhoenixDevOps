@@ -74,8 +74,9 @@ resource "google_cloudfunctions2_function" "ui" {
     all_traffic_on_latest_revision   = true
 
     environment_variables = {
-      API_URL  = var.api_url
-      USE_MOCK = tostring(var.use_mock)
+      API_URL      = var.api_url
+      UI_BASE_PATH = "/${var.function_name}"
+      USE_MOCK     = tostring(var.use_mock)
     }
   }
 

@@ -3,6 +3,7 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const distRoot = resolve(fileURLToPath(new URL("./dist/", import.meta.url)));
+const cloudFunctionsHostPattern = /(?:^|\.)cloudfunctions\.net(?::\d+)?$/i;
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -29,14 +30,15 @@ export async function serveUi(req, res) {
   }
 
   const requestUrl = new URL(req.url || "/", "http://localhost");
-  if (requestUrl.pathname === "/config.js") {
+  const requestPath = normalizeRequestPath(requestUrl.pathname);
+  if (requestPath === "/config.js") {
     sendRuntimeConfig(res, req.method === "HEAD");
     return;
   }
 
   let requestedPath;
   try {
-    requestedPath = decodeURIComponent(requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname);
+    requestedPath = decodeURIComponent(requestPath === "/" ? "/index.html" : requestPath);
   } catch {
     res.status(400).send("Bad Request");
     return;
@@ -49,10 +51,10 @@ export async function serveUi(req, res) {
   }
 
   try {
-    await sendFile(res, filePath, req.method === "HEAD");
+    await sendFile(res, filePath, req.method === "HEAD", assetBasePath(req));
   } catch (error) {
     if (isNotFound(error)) {
-      await sendFile(res, resolve(distRoot, "index.html"), req.method === "HEAD");
+      await sendFile(res, resolve(distRoot, "index.html"), req.method === "HEAD", assetBasePath(req));
       return;
     }
     throw error;
@@ -74,8 +76,8 @@ function sendRuntimeConfig(res, headOnly) {
   res.status(200).send(body);
 }
 
-async function sendFile(res, filePath, headOnly) {
-  const content = await readFile(filePath);
+async function sendFile(res, filePath, headOnly, basePath = "") {
+  let content = await readFile(filePath);
   const extension = extname(filePath).toLowerCase();
   const relativePath = filePath.slice(distRoot.length).replaceAll("\\", "/");
 
@@ -87,6 +89,9 @@ async function sendFile(res, filePath, headOnly) {
   if (headOnly) {
     res.status(200).end();
     return;
+  }
+  if (extension === ".html" && basePath) {
+    content = rewriteRootRelativeUrls(content.toString("utf8"), basePath);
   }
   res.status(200).send(content);
 }
@@ -102,4 +107,49 @@ function readBoolean(value) {
 
 function isNotFound(error) {
   return error && typeof error === "object" && error.code === "ENOENT";
+}
+
+function normalizeRequestPath(pathname) {
+  const basePath = configuredBasePath();
+  if (!basePath) {
+    return pathname;
+  }
+  if (pathname === basePath) {
+    return "/";
+  }
+  return pathname.startsWith(`${basePath}/`) ? pathname.slice(basePath.length) : pathname;
+}
+
+function assetBasePath(req) {
+  if (!isCloudFunctionsHost(req)) {
+    return "";
+  }
+  return configuredBasePath();
+}
+
+function configuredBasePath() {
+  return normalizeBasePath(process.env.UI_BASE_PATH || process.env.K_SERVICE || process.env.FUNCTION_NAME);
+}
+
+function normalizeBasePath(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue || rawValue === "/") {
+    return "";
+  }
+  const withLeadingSlash = rawValue.startsWith("/") ? rawValue : `/${rawValue}`;
+  return withLeadingSlash.replace(/\/+$/, "");
+}
+
+function isCloudFunctionsHost(req) {
+  const host = String(req.get?.("host") || req.headers?.host || "");
+  return cloudFunctionsHostPattern.test(host);
+}
+
+function rewriteRootRelativeUrls(html, basePath) {
+  return html.replace(/\b(src|href)="\/([^"]*)"/g, (match, attribute, path) => {
+    if (!path || path.startsWith("/") || path.startsWith(`${basePath.slice(1)}/`)) {
+      return match;
+    }
+    return `${attribute}="${basePath}/${path}"`;
+  });
 }

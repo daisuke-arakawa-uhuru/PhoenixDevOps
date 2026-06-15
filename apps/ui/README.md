@@ -44,6 +44,8 @@ Terraform でホスティングする環境では、`VITE_API_URL` ではなく 
 `window.__PHOENIX_CONFIG__.API_URL` を使用します。`config.js` は `infra/terraform/modules/ui_hosting` の
 Cloud Functions から動的に配信され、
 値には dev 環境の `module.api.function_uri` が入ります。
+Cloud Functions のトリガー URL（`...cloudfunctions.net/<function-name>`）から開いた場合は、
+UI 関数が静的 asset と `config.js` の参照先を関数配下へ補正します。
 
 ## 🧪 モック検証モード（API不要での確認）
 

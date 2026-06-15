@@ -201,6 +201,7 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
 * Web UIはTerraform管理のCloud Functions Gen2としてホスティングする。
 * デプロイ環境のAPI URLは、Viteのbuild-time `.env` ではなく、TerraformがWeb UI関数の環境変数として渡す。
 * Web UI関数は `/config.js` を動的生成し、`window.__PHOENIX_CONFIG__.API_URL` としてHTTP APIのURLを公開する。UIはこれを優先して参照する。
+* Cloud Functions のトリガー URL（`https://<region>-<project>.cloudfunctions.net/<function-name>`）から開いた場合も、Web UI関数は root-relative な静的 asset と `config.js` の参照先を関数配下へ補正する。
 * GCS bucket の Public Access Prevention が enforced の環境でも公開できるよう、静的ファイルの公開は GCS bucket IAM ではなく Cloud Functions / Cloud Run invoker IAM で制御する。
 
 ---
