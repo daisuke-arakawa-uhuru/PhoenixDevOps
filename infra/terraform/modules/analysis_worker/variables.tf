@@ -37,6 +37,12 @@ variable "source_archive_retention_days" {
   default     = 30
 }
 
+variable "build_iam_propagation_wait_duration" {
+  description = "Cloud Functions build service account の IAM 伝播待ち時間"
+  type        = string
+  default     = "90s"
+}
+
 variable "assets_bucket_name" {
   description = "uploads/results を保持する assets bucket 名"
   type        = string

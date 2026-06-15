@@ -129,6 +129,12 @@ service account に指定します。API 実行 SA には、この invoker SA �
   解析ワーカーについては Issue #4/#14 の Terraform 実装として、worker SA に assets bucket の
   `roles/storage.objectAdmin` と project の `roles/datastore.user`、Cloud Tasks 用 invoker SA に
   `roles/cloudfunctions.invoker` / `roles/run.invoker` を付与します。
+- **Cloud Functions Gen2 の build SA 権限**: default build service account
+  `<project-number>-compute@developer.gserviceaccount.com` が GCF 内部 source bucket を読めないと、
+  `gcs-fetcher` が `Storage Object Viewer permission` 不足で失敗します。解析ワーカーモジュールでは
+  この build SA に `roles/storage.objectViewer` / `roles/artifactregistry.writer` /
+  `roles/logging.logWriter` を付与し、IAM 伝播待ちを入れてから関数を作成します。初回 apply で
+  これらの project IAM を作成するため、terraform 実行 SA には project IAM policy 更新権限が必要です。
 
 ## ロケーション表記について
 

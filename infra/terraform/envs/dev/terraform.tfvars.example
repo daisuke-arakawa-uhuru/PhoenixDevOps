@@ -2,8 +2,8 @@
 #   cp terraform.tfvars.example terraform.tfvars
 # terraform.tfvars は .gitignore 済み（コミット禁止）。
 
-# 山本担当のプロジェクトセットアップで払い出された GCP プロジェクト ID
-project_id = "your-gcp-project-id"
+# GCP プロジェクト ID
+project_id = "phoenixdevops"
 
 # リージョン（既定: asia-northeast1 / 東京）
 region = "asia-northeast1"

@@ -1,5 +1,5 @@
 variable "project_id" {
-  description = "GCP プロジェクト ID（山本担当のプロジェクトセットアップで払い出された値）"
+  description = "GCP プロジェクト ID"
   type        = string
 }
 

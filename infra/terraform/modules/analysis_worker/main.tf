@@ -1,6 +1,11 @@
 locals {
-  source_archive_output_path = "${path.root}/.terraform/${var.function_name}.zip"
-  source_archive_name        = "functions/${var.function_name}/${data.archive_file.source.output_sha256}.zip"
+  source_archive_output_path          = "${path.root}/.terraform/${var.function_name}.zip"
+  source_archive_name                 = "functions/${var.function_name}/${data.archive_file.source.output_sha256}.zip"
+  cloud_functions_build_account_email = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+data "google_project" "current" {
+  project_id = var.project_id
 }
 
 data "archive_file" "source" {
@@ -69,6 +74,34 @@ resource "google_project_iam_member" "worker_firestore_user" {
   member  = "serviceAccount:${google_service_account.worker.email}"
 }
 
+resource "google_project_iam_member" "build_storage_object_viewer" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${local.cloud_functions_build_account_email}"
+}
+
+resource "google_project_iam_member" "build_artifact_registry_writer" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${local.cloud_functions_build_account_email}"
+}
+
+resource "google_project_iam_member" "build_logs_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${local.cloud_functions_build_account_email}"
+}
+
+resource "time_sleep" "wait_for_build_iam_propagation" {
+  create_duration = var.build_iam_propagation_wait_duration
+
+  depends_on = [
+    google_project_iam_member.build_artifact_registry_writer,
+    google_project_iam_member.build_logs_writer,
+    google_project_iam_member.build_storage_object_viewer,
+  ]
+}
+
 resource "google_secret_manager_secret_iam_member" "worker_gemini_api_key_accessor" {
   count = var.gemini_api_key_secret_id == null ? 0 : 1
 
@@ -127,6 +160,7 @@ resource "google_cloudfunctions2_function" "worker" {
   }
 
   depends_on = [
+    time_sleep.wait_for_build_iam_propagation,
     google_project_iam_member.worker_firestore_user,
     google_secret_manager_secret_iam_member.worker_gemini_api_key_accessor,
     google_storage_bucket_iam_member.worker_assets_object_admin,
