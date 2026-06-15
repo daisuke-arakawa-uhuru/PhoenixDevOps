@@ -1,12 +1,13 @@
 name: Terraform Plan (dev)
 
-# PR で infra の変更が入ったら、fmt/validate/plan を実行して結果を PR にコメントする。
+# PR で infra または analysis-worker の変更が入ったら、fmt/validate/plan を実行して結果を PR にコメントする。
 # 認証は Workload Identity 連携（WIF）。長期のサービスアカウントキーは使わない。
 
 on:
   pull_request:
     branches: [master]
     paths:
+      - "apps/analysis-worker/**"
       - "infra/terraform/**"
       - ".github/workflows/terraform-plan.yml"
 

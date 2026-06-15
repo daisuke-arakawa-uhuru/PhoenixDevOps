@@ -2,8 +2,8 @@
 #   cp terraform.tfvars.example terraform.tfvars
 # terraform.tfvars は .gitignore 済み（コミット禁止）。
 
-# 山本担当のプロジェクトセットアップで払い出された GCP プロジェクト ID
-project_id = "your-gcp-project-id"
+# GCP プロジェクト ID
+project_id = "phoenixdevops"
 
 # リージョン（既定: asia-northeast1 / 東京）
 region = "asia-northeast1"
@@ -20,3 +20,24 @@ results_retention_days = 90
 
 # dev で作り直しを容易にしたい場合のみ true。中身ごと削除可能になるため注意。
 force_destroy = false
+
+# 解析ワーカー Cloud Functions
+analysis_worker_function_name                     = "phoenixdevops-dev-analysis-worker"
+analysis_worker_source_bucket_name                = null
+analysis_worker_runtime                           = "nodejs24"
+analysis_worker_service_account_id                = "pdx-dev-worker"
+analysis_task_invoker_service_account_id          = "pdx-dev-task-invoker"
+analysis_worker_available_memory                  = "1Gi"
+analysis_worker_timeout_seconds                   = 540
+analysis_worker_min_instance_count                = 0
+analysis_worker_max_instance_count                = 3
+analysis_worker_max_instance_request_concurrency = 1
+analysis_worker_ingress_settings                  = "ALLOW_ALL"
+analysis_worker_results_prefix_template           = "results/{job_id}"
+analysis_worker_gemini_model                      = "gemini-2.0-flash"
+analysis_worker_gemini_dry_run                    = false
+
+# Gemini API key は実値を tfvars に書かない。Secret Manager の secret ID のみ指定する。
+# 未指定時は GEMINI_API_KEY を設定せず、アプリ側の dry-run client にフォールバックする。
+gemini_api_key_secret_id      = null
+gemini_api_key_secret_version = "latest"

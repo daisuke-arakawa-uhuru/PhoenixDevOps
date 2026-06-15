@@ -1,5 +1,5 @@
 variable "project_id" {
-  description = "GCP プロジェクト ID（山本担当のプロジェクトセットアップで払い出された値）"
+  description = "GCP プロジェクト ID"
   type        = string
 }
 
@@ -43,4 +43,106 @@ variable "firestore_delete_protection" {
   description = "Firestore データベースの誤削除防止"
   type        = bool
   default     = true
+}
+
+variable "analysis_worker_function_name" {
+  description = "解析ワーカー Cloud Functions 名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "analysis_worker_source_bucket_name" {
+  description = "Cloud Functions source archive 用 GCS バケット名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "analysis_worker_runtime" {
+  description = "解析ワーカー Cloud Functions runtime"
+  type        = string
+  default     = "nodejs24"
+}
+
+variable "analysis_worker_service_account_id" {
+  description = "解析ワーカー実行用サービスアカウント ID（30 文字以内）。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "analysis_task_invoker_service_account_id" {
+  description = "Cloud Tasks が解析ワーカーを OIDC で呼び出すためのサービスアカウント ID（30 文字以内）。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "analysis_worker_available_memory" {
+  description = "解析ワーカー Cloud Functions に割り当てるメモリ"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "analysis_worker_timeout_seconds" {
+  description = "解析ワーカー Cloud Functions のタイムアウト秒数"
+  type        = number
+  default     = 540
+}
+
+variable "analysis_worker_min_instance_count" {
+  description = "解析ワーカー Cloud Functions の最小インスタンス数"
+  type        = number
+  default     = 0
+}
+
+variable "analysis_worker_max_instance_count" {
+  description = "解析ワーカー Cloud Functions の最大インスタンス数"
+  type        = number
+  default     = 3
+}
+
+variable "analysis_worker_max_instance_request_concurrency" {
+  description = "解析ワーカー 1 インスタンスあたりの最大同時リクエスト数"
+  type        = number
+  default     = 1
+}
+
+variable "analysis_worker_ingress_settings" {
+  description = "解析ワーカー Cloud Functions の ingress 設定"
+  type        = string
+  default     = "ALLOW_ALL"
+}
+
+variable "firestore_jobs_collection" {
+  description = "解析ジョブ状態を保存する Firestore コレクション名"
+  type        = string
+  default     = "jobs"
+}
+
+variable "analysis_worker_results_prefix_template" {
+  description = "解析ワーカーの成果物保存 prefix template"
+  type        = string
+  default     = "results/{job_id}"
+}
+
+variable "analysis_worker_gemini_model" {
+  description = "解析ワーカーが使用する Gemini model"
+  type        = string
+  default     = "gemini-2.0-flash"
+}
+
+variable "analysis_worker_gemini_dry_run" {
+  description = "true の場合、解析ワーカーは Gemini API を呼び出さず dry-run client を使用する"
+  type        = bool
+  default     = false
+}
+
+variable "gemini_api_key_secret_id" {
+  description = "GEMINI_API_KEY として参照する Secret Manager secret ID。secret 実値は Terraform に渡さない。"
+  type        = string
+  default     = null
+}
+
+variable "gemini_api_key_secret_version" {
+  description = "GEMINI_API_KEY secret の version"
+  type        = string
+  default     = "latest"
 }

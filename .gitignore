@@ -1,3 +1,7 @@
+output/
+dist/
+node_modules/
+coverage/
 # === Terraform ===
 # ローカル作業ディレクトリ・プラグイン
 **/.terraform/*

@@ -22,3 +22,28 @@ output "firestore_database_name" {
   description = "Firestore データベース名"
   value       = module.firestore.database_name
 }
+
+output "analysis_worker_function_name" {
+  description = "解析ワーカー Cloud Functions 名"
+  value       = module.analysis_worker.function_name
+}
+
+output "analysis_worker_function_uri" {
+  description = "Cloud Tasks から呼び出す解析ワーカー HTTPS URI"
+  value       = module.analysis_worker.function_uri
+}
+
+output "analysis_worker_source_bucket_name" {
+  description = "解析ワーカー source archive 用 GCS バケット名"
+  value       = module.analysis_worker.source_bucket_name
+}
+
+output "analysis_worker_service_account_email" {
+  description = "解析ワーカー実行用サービスアカウント"
+  value       = module.analysis_worker.worker_service_account_email
+}
+
+output "analysis_task_invoker_service_account_email" {
+  description = "Cloud Tasks OIDC token に指定する呼び出し用サービスアカウント"
+  value       = module.analysis_worker.task_invoker_service_account_email
+}
