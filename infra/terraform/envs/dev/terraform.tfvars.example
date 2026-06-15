@@ -37,7 +37,26 @@ analysis_worker_results_prefix_template           = "results/{job_id}"
 analysis_worker_gemini_model                      = "gemini-2.0-flash"
 analysis_worker_gemini_dry_run                    = false
 
+# HTTP API Cloud Functions
+api_function_name                     = "phoenixdevops-dev-api"
+api_source_bucket_name                = null
+api_runtime                           = "nodejs24"
+api_service_account_id                = "pdx-dev-api"
+api_available_memory                  = "1Gi"
+api_timeout_seconds                   = 300
+api_min_instance_count                = 0
+api_max_instance_count                = 3
+api_max_instance_request_concurrency = 1
+api_ingress_settings                  = "ALLOW_ALL"
+api_allow_unauthenticated             = true
+firestore_uploads_collection          = "uploads"
+api_signed_url_expiration_seconds     = 3600
+api_uploads_prefix_template           = "uploads/{upload_id}"
+api_results_prefix_template           = "results/{job_id}"
+api_max_document_files                = 600
+
 # Gemini API key は実値を tfvars に書かない。Secret Manager の secret ID のみ指定する。
 # 未指定時は GEMINI_API_KEY を設定せず、アプリ側の dry-run client にフォールバックする。
-gemini_api_key_secret_id      = null
+gemini_api_key_secret_id      = "gemini-api-key"
 gemini_api_key_secret_version = "latest"
+analysis_worker_gemini_dry_run = false # 実機で動かす場合は必ず false にする

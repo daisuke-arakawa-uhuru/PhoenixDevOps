@@ -3,7 +3,7 @@
 PhoenixDevOps の GCP リソースを Terraform で管理します。**コンソールからの手動変更は禁止**
 （手動変更による IaC 崩壊こそ本プロダクトが解決したい課題であり、自分たちで再現しない）。
 
-## 担当範囲（Issue #2 / #4 / #14）
+## 担当範囲（Issue #2 / #3 / #4 / #14）
 
 本ディレクトリで現在管理しているのは、以下の領域です。
 
@@ -12,6 +12,7 @@ PhoenixDevOps の GCP リソースを Terraform で管理します。**コンソ
 | Cloud Storage | `*-assets` バケット（`uploads/` `results/` プレフィックス） | [modules/storage](terraform/modules/storage) |
 | Cloud Tasks | 解析ジョブキュー `analysis-job-queue` | [modules/tasks](terraform/modules/tasks) |
 | Firestore | `(default)` DB + `jobs` 複合インデックス | [modules/firestore](terraform/modules/firestore) |
+| Cloud Functions | HTTP API `*-api` + 実行 SA | [modules/api](terraform/modules/api) |
 | Cloud Functions | 解析ワーカー `*-analysis-worker` + 実行/呼び出し SA | [modules/analysis_worker](terraform/modules/analysis_worker) |
 
 > Firestore の `jobs` コレクション設計は [documents/design/firestore-jobs.md](../documents/design/firestore-jobs.md) を参照。
@@ -24,6 +25,7 @@ infra/terraform/
 ├── modules/            # 再利用可能なリソース定義
 │   ├── storage/
 │   ├── tasks/
+│   ├── api/
 │   ├── analysis_worker/
 │   └── firestore/
 └── envs/
@@ -43,7 +45,7 @@ infra/terraform/
 1. **GCP プロジェクト**と必要 API の有効化
    `storage.googleapis.com` / `cloudtasks.googleapis.com` / `firestore.googleapis.com` /
    `cloudfunctions.googleapis.com` / `cloudbuild.googleapis.com` / `run.googleapis.com` /
-   `artifactregistry.googleapis.com` / `secretmanager.googleapis.com`
+   `artifactregistry.googleapis.com` / `secretmanager.googleapis.com` / `iamcredentials.googleapis.com`
 2. **state 用 GCS バケット**（例: `phoenixdevops-tfstate`）。バージョニング有効を推奨。
    - このバケット自身は Terraform 管理外（鶏卵問題回避のため手動 or 別 bootstrap）。
 3. **Workload Identity 連携（WIF）**
@@ -107,6 +109,21 @@ API 側が Cloud Tasks の HTTP target を作成する際は、Terraform output 
 service account に指定します。API 実行 SA には、この invoker SA への `iam.serviceAccounts.actAs`
 相当の権限付与が別途必要です。
 
+### HTTP API のデプロイ設定
+
+Issue #3 の HTTP API は [modules/api](terraform/modules/api) で Cloud Functions Gen2 として管理します。
+Terraform output の `api_function_uri` が Web UI から呼び出す API URL です。
+
+API 実行 SA には以下を付与します。
+
+- assets bucket の `roles/storage.objectAdmin`
+- project の `roles/datastore.user`
+- project の `roles/cloudtasks.enqueuer`
+- Cloud Tasks OIDC 用 invoker SA への `roles/iam.serviceAccountUser`
+- 署名付き URL 発行用に API SA 自身への `roles/iam.serviceAccountTokenCreator`
+
+dev では `api_allow_unauthenticated = true` とし、Cloud Functions/Cloud Run invoker を `allUsers` に付与します。
+
 ## CI のゲート（重要）
 
 - `apply` ワークフローは GitHub Environment `dev` を通します。**`dev` に required reviewers を
@@ -125,16 +142,17 @@ service account に指定します。API 実行 SA には、この invoker SA �
   で取り込んでください。
 - **API 有効化のラグ**: `firestore.googleapis.com` 有効化直後はデータベース/インデックス作成が
   間に合わず初回 apply が失敗することがあります。少し待って再実行で解消します。
-- **IAM（アクセス権付与）の担当**: API など未実装領域の実行 SA への権限付与は、各担当 PR で扱います。
-  解析ワーカーについては Issue #4/#14 の Terraform 実装として、worker SA に assets bucket の
-  `roles/storage.objectAdmin` と project の `roles/datastore.user`、Cloud Tasks 用 invoker SA に
+- **IAM（アクセス権付与）の担当**: API については Issue #3、解析ワーカーについては Issue #4/#14 の
+  Terraform 実装で扱います。API SA は uploads/results bucket、Firestore、Cloud Tasks、OIDC 用
+  service account impersonation の権限を持ちます。worker SA には assets bucket の
+  `roles/storage.objectAdmin` と project の `roles/datastore.user`、Cloud Tasks 用 invoker SA には
   `roles/cloudfunctions.invoker` / `roles/run.invoker` を付与します。
 - **Cloud Functions Gen2 の build SA 権限**: default build service account
   `<project-number>-compute@developer.gserviceaccount.com` が GCF 内部 source bucket を読めないと、
-  `gcs-fetcher` が `Storage Object Viewer permission` 不足で失敗します。解析ワーカーモジュールでは
-  この build SA に `roles/storage.objectViewer` / `roles/artifactregistry.writer` /
-  `roles/logging.logWriter` を付与し、IAM 伝播待ちを入れてから関数を作成します。初回 apply で
-  これらの project IAM を作成するため、terraform 実行 SA には project IAM policy 更新権限が必要です。
+  `gcs-fetcher` が `Storage Object Viewer permission` 不足で失敗します。dev 構成ではこの build SA に
+  `roles/storage.objectViewer` / `roles/artifactregistry.writer` / `roles/logging.logWriter` を付与し、
+  IAM 伝播待ちを入れてから Cloud Functions を作成します。初回 apply でこれらの project IAM を
+  作成するため、terraform 実行 SA には project IAM policy 更新権限が必要です。
 
 ## ロケーション表記について
 
