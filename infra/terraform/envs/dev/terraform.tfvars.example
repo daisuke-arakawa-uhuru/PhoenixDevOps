@@ -57,5 +57,6 @@ api_max_document_files                = 600
 
 # Gemini API key は実値を tfvars に書かない。Secret Manager の secret ID のみ指定する。
 # 未指定時は GEMINI_API_KEY を設定せず、アプリ側の dry-run client にフォールバックする。
-gemini_api_key_secret_id      = null
+gemini_api_key_secret_id      = "gemini-api-key"
 gemini_api_key_secret_version = "latest"
+analysis_worker_gemini_dry_run = false # 実機で動かす場合は必ず false にする
