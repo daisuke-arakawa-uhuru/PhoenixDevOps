@@ -1,16 +1,15 @@
-"use strict";
+import { WorkerConfig } from "./config.js";
+import { buildOrchestrator } from "./factories.js";
+import { AnalysisTaskPayload, PayloadValidationError } from "./payload.js";
+import { Request, Response } from "@google-cloud/functions-framework";
 
-const { WorkerConfig } = require("./config");
-const { buildOrchestrator } = require("./factories");
-const { AnalysisTaskPayload, PayloadValidationError } = require("./payload");
-
-async function runAnalysisWorker(req, res) {
+export async function runAnalysisWorker(req: Request, res: Response): Promise<void> {
   if (req.method !== "POST") {
     res.status(405).json({ error: "method_not_allowed" });
     return;
   }
 
-  let payload;
+  let payload: AnalysisTaskPayload;
   try {
     payload = AnalysisTaskPayload.fromMapping(req.body);
   } catch (error) {
@@ -37,7 +36,3 @@ async function runAnalysisWorker(req, res) {
     });
   }
 }
-
-module.exports = {
-  runAnalysisWorker,
-};

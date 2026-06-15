@@ -3,15 +3,16 @@
 PhoenixDevOps の GCP リソースを Terraform で管理します。**コンソールからの手動変更は禁止**
 （手動変更による IaC 崩壊こそ本プロダクトが解決したい課題であり、自分たちで再現しない）。
 
-## 担当範囲（Issue #2）
+## 担当範囲（Issue #2 / #4 / #14）
 
-本ディレクトリで現在管理しているのは、**新川担当**の以下 3 領域です。
+本ディレクトリで現在管理しているのは、以下の領域です。
 
 | 領域 | リソース | モジュール |
 | --- | --- | --- |
 | Cloud Storage | `*-assets` バケット（`uploads/` `results/` プレフィックス） | [modules/storage](terraform/modules/storage) |
 | Cloud Tasks | 解析ジョブキュー `analysis-job-queue` | [modules/tasks](terraform/modules/tasks) |
 | Firestore | `(default)` DB + `jobs` 複合インデックス | [modules/firestore](terraform/modules/firestore) |
+| Cloud Functions | 解析ワーカー `*-analysis-worker` + 実行/呼び出し SA | [modules/analysis_worker](terraform/modules/analysis_worker) |
 
 > Firestore の `jobs` コレクション設計は [documents/design/firestore-jobs.md](../documents/design/firestore-jobs.md) を参照。
 > GCP プロジェクト本体・API 有効化・Gemini/Secret Manager は **山本担当**（別途）。
@@ -23,6 +24,7 @@ infra/terraform/
 ├── modules/            # 再利用可能なリソース定義
 │   ├── storage/
 │   ├── tasks/
+│   ├── analysis_worker/
 │   └── firestore/
 └── envs/
     └── dev/            # dev 環境のルート（モジュールを束ねる）
@@ -39,13 +41,17 @@ infra/terraform/
 実 `plan`/`apply` には、プロジェクトセットアップ側で以下が用意されている必要があります。
 
 1. **GCP プロジェクト**と必要 API の有効化
-   `storage.googleapis.com` / `cloudtasks.googleapis.com` / `firestore.googleapis.com`
+   `storage.googleapis.com` / `cloudtasks.googleapis.com` / `firestore.googleapis.com` /
+   `cloudfunctions.googleapis.com` / `cloudbuild.googleapis.com` / `run.googleapis.com` /
+   `artifactregistry.googleapis.com` / `secretmanager.googleapis.com`
 2. **state 用 GCS バケット**（例: `phoenixdevops-tfstate`）。バージョニング有効を推奨。
    - このバケット自身は Terraform 管理外（鶏卵問題回避のため手動 or 別 bootstrap）。
 3. **Workload Identity 連携（WIF）**
    - Workload Identity Pool + Provider（GitHub OIDC `token.actions.githubusercontent.com`）
    - terraform 実行用サービスアカウント（必要最小限のロール: 例 `roles/storage.admin`,
-     `roles/cloudtasks.admin`, `roles/datastore.owner` 等。`owner`/`editor` は付与しない）
+     `roles/cloudtasks.admin`, `roles/datastore.owner`, `roles/cloudfunctions.developer`,
+     `roles/run.admin`, `roles/iam.serviceAccountAdmin`, `roles/iam.serviceAccountUser` 等。
+     `owner`/`editor` は付与しない）
    - 当該 SA に対し、対象リポジトリの WIF プリンシパルからの
      `roles/iam.workloadIdentityUser` 借用を許可
 
@@ -83,6 +89,24 @@ terraform plan
 # apply は原則 CI（master マージ）で実行する
 ```
 
+### 解析ワーカーの secret 設定
+
+Gemini API キーの実値は Terraform 変数や `*.tfvars` に書かず、Secret Manager で管理します。
+Terraform には secret ID のみを渡します。
+
+```hcl
+gemini_api_key_secret_id      = "gemini-api-key"
+gemini_api_key_secret_version = "latest"
+```
+
+未指定の場合、Cloud Functions には `GEMINI_API_KEY` が設定されず、解析ワーカー側の dry-run client に
+フォールバックします。
+
+API 側が Cloud Tasks の HTTP target を作成する際は、Terraform output の
+`analysis_worker_function_uri` を URL に、`analysis_task_invoker_service_account_email` を OIDC token の
+service account に指定します。API 実行 SA には、この invoker SA への `iam.serviceAccounts.actAs`
+相当の権限付与が別途必要です。
+
 ## CI のゲート（重要）
 
 - `apply` ワークフローは GitHub Environment `dev` を通します。**`dev` に required reviewers を
@@ -101,9 +125,16 @@ terraform plan
   で取り込んでください。
 - **API 有効化のラグ**: `firestore.googleapis.com` 有効化直後はデータベース/インデックス作成が
   間に合わず初回 apply が失敗することがあります。少し待って再実行で解消します。
-- **IAM（アクセス権付与）の担当**: 本 IaC はリソース作成のみで、実行 SA（API/ワーカーの
-  Cloud Functions）への bucket/queue/firestore アクセス権限は付与していません。これは
-  アプリ/権限担当の別 PR で扱います（ここで `roles/editor` を雑に付けないこと）。
+- **IAM（アクセス権付与）の担当**: API など未実装領域の実行 SA への権限付与は、各担当 PR で扱います。
+  解析ワーカーについては Issue #4/#14 の Terraform 実装として、worker SA に assets bucket の
+  `roles/storage.objectAdmin` と project の `roles/datastore.user`、Cloud Tasks 用 invoker SA に
+  `roles/cloudfunctions.invoker` / `roles/run.invoker` を付与します。
+- **Cloud Functions Gen2 の build SA 権限**: default build service account
+  `<project-number>-compute@developer.gserviceaccount.com` が GCF 内部 source bucket を読めないと、
+  `gcs-fetcher` が `Storage Object Viewer permission` 不足で失敗します。解析ワーカーモジュールでは
+  この build SA に `roles/storage.objectViewer` / `roles/artifactregistry.writer` /
+  `roles/logging.logWriter` を付与し、IAM 伝播待ちを入れてから関数を作成します。初回 apply で
+  これらの project IAM を作成するため、terraform 実行 SA には project IAM policy 更新権限が必要です。
 
 ## ロケーション表記について
 

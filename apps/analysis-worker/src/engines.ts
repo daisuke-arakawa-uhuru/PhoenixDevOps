@@ -1,15 +1,24 @@
-"use strict";
-
-const path = require("node:path");
-const {
+import path from "node:path";
+import { AnalysisTaskPayload } from "./payload.js";
+import { AnalysisInput, SpecificationResult } from "./prompts.js";
+import { GeminiClient } from "./gemini.js";
+import {
   buildDocumentExtractionPrompt,
   buildDriftReportPrompt,
   buildSourceAnalysisPrompt,
   buildTrueDesignPrompt,
-} = require("./prompts");
+} from "./prompts.js";
 
-class PlaceholderSourceCodeAnalysisEngine {
-  async extract(payload, inputs) {
+export interface ExtractionResult extends SpecificationResult {
+  extractedItems: Record<string, unknown>;
+}
+
+export interface AnalysisEngine {
+  extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult>;
+}
+
+export class PlaceholderSourceCodeAnalysisEngine implements AnalysisEngine {
+  async extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult> {
     return {
       summary: "Source analysis engine placeholder. Gemini extraction is not implemented yet.",
       extractedItems: {
@@ -27,12 +36,10 @@ class PlaceholderSourceCodeAnalysisEngine {
   }
 }
 
-class GeminiSourceCodeAnalysisEngine {
-  constructor(geminiClient) {
-    this.geminiClient = geminiClient;
-  }
+export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
+  constructor(private geminiClient: GeminiClient) {}
 
-  async extract(payload, inputs) {
+  async extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult> {
     const [overviewMarkdown, overviewItems] = buildSourceCodeOverview(inputs);
     const prompt = buildSourceAnalysisPrompt(payload, inputs, overviewMarkdown);
     const response = await this.geminiClient.generate(prompt);
@@ -48,10 +55,11 @@ class GeminiSourceCodeAnalysisEngine {
   }
 }
 
-class PlaceholderDocumentExtractionEngine {
-  async extract(payload, inputs) {
+export class PlaceholderDocumentExtractionEngine implements AnalysisEngine {
+  async extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult> {
     return {
-      summary: "Document extraction engine placeholder. PDF/Excel extraction is not implemented yet.",
+      summary:
+        "Document extraction engine placeholder. PDF/Excel extraction is not implemented yet.",
       extractedItems: {
         document_uris: [...inputs.documentUris],
         pending_extractors: ["pdf", "excel", "markdown", "plain_text"],
@@ -60,12 +68,10 @@ class PlaceholderDocumentExtractionEngine {
   }
 }
 
-class GeminiDocumentExtractionEngine {
-  constructor(geminiClient) {
-    this.geminiClient = geminiClient;
-  }
+export class GeminiDocumentExtractionEngine implements AnalysisEngine {
+  constructor(private geminiClient: GeminiClient) {}
 
-  async extract(payload, inputs) {
+  async extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult> {
     const [overviewMarkdown, overviewItems] = buildDocumentOverview(inputs);
     const prompt = buildDocumentExtractionPrompt(payload, inputs, overviewMarkdown);
     const response = await this.geminiClient.generate(prompt);
@@ -81,8 +87,20 @@ class GeminiDocumentExtractionEngine {
   }
 }
 
-class PlaceholderTrueDesignGenerator {
-  async generate(payload, sourceSpecification, documentSpecification) {
+export interface DesignGenerator {
+  generate(
+    payload: AnalysisTaskPayload,
+    sourceSpecification: ExtractionResult,
+    documentSpecification: ExtractionResult,
+  ): Promise<string>;
+}
+
+export class PlaceholderTrueDesignGenerator implements DesignGenerator {
+  async generate(
+    payload: AnalysisTaskPayload,
+    sourceSpecification: ExtractionResult,
+    documentSpecification: ExtractionResult,
+  ): Promise<string> {
     const title = payload.projectName || payload.jobId;
     return [
       "# True Design Document",
@@ -95,7 +113,9 @@ class PlaceholderTrueDesignGenerator {
       `- Project: ${title}`,
       `- Job ID: ${payload.jobId}`,
       `- Source archive: ${sourceSpecification.extractedItems.source_archive_uri}`,
-      `- Existing documents: ${(documentSpecification.extractedItems.document_uris || []).length}`,
+      `- Existing documents: ${
+        ((documentSpecification.extractedItems.document_uris as string[]) || []).length
+      }`,
       "",
       "## Pending Implementation",
       "",
@@ -107,18 +127,22 @@ class PlaceholderTrueDesignGenerator {
   }
 }
 
-class GeminiTrueDesignGenerator {
-  constructor(geminiClient) {
-    this.geminiClient = geminiClient;
-  }
+export class GeminiTrueDesignGenerator implements DesignGenerator {
+  constructor(private geminiClient: GeminiClient) {}
 
-  async generate(payload, sourceSpecification, documentSpecification) {
-    return this.geminiClient.generate(buildTrueDesignPrompt(payload, sourceSpecification, documentSpecification));
+  async generate(
+    payload: AnalysisTaskPayload,
+    sourceSpecification: ExtractionResult,
+    documentSpecification: ExtractionResult,
+  ): Promise<string> {
+    return this.geminiClient.generate(
+      buildTrueDesignPrompt(payload, sourceSpecification, documentSpecification),
+    );
   }
 }
 
-class PlaceholderDriftReportGenerator {
-  async generate() {
+export class PlaceholderDriftReportGenerator implements DesignGenerator {
+  async generate(): Promise<string> {
     return [
       "# Document Drift Report",
       "",
@@ -142,17 +166,21 @@ class PlaceholderDriftReportGenerator {
   }
 }
 
-class GeminiDriftReportGenerator {
-  constructor(geminiClient) {
-    this.geminiClient = geminiClient;
-  }
+export class GeminiDriftReportGenerator implements DesignGenerator {
+  constructor(private geminiClient: GeminiClient) {}
 
-  async generate(payload, sourceSpecification, documentSpecification) {
-    return this.geminiClient.generate(buildDriftReportPrompt(payload, sourceSpecification, documentSpecification));
+  async generate(
+    payload: AnalysisTaskPayload,
+    sourceSpecification: ExtractionResult,
+    documentSpecification: ExtractionResult,
+  ): Promise<string> {
+    return this.geminiClient.generate(
+      buildDriftReportPrompt(payload, sourceSpecification, documentSpecification),
+    );
   }
 }
 
-function generatedArtifacts(trueDesignMarkdown, driftReportMarkdown) {
+export function generatedArtifacts(trueDesignMarkdown: string, driftReportMarkdown: string) {
   return {
     trueDesignMarkdown,
     driftReportMarkdown,
@@ -165,13 +193,15 @@ function generatedArtifacts(trueDesignMarkdown, driftReportMarkdown) {
   };
 }
 
-function buildSourceCodeOverview(inputs) {
+export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
   const filePaths = inputs.sourceFiles.map((file) => file.path);
   const dependencies = collectDependencies(inputs.sourceFiles);
   const apiRoutes = collectApiRoutes(inputs.sourceFiles);
   const databaseDefinitions = collectDatabaseDefinitions(inputs.sourceFiles);
   const configFiles = filePaths.filter((filePath) => isConfigFile(filePath));
-  const readmeFiles = filePaths.filter((filePath) => path.basename(filePath).toLowerCase().startsWith("readme"));
+  const readmeFiles = filePaths.filter((filePath) =>
+    path.basename(filePath).toLowerCase().startsWith("readme"),
+  );
 
   const items = {
     file_structure: filePaths,
@@ -212,10 +242,12 @@ function buildSourceCodeOverview(inputs) {
   return [lines.join("\n"), items];
 }
 
-function buildDocumentOverview(inputs) {
+export function buildDocumentOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
   const documentFiles = [...inputs.documentFiles];
   const unsupportedFiles = documentFiles
-    .filter((file) => file.content.startsWith("[未対応") || file.content.startsWith("[PDF本文抽出には"))
+    .filter(
+      (file) => file.content.startsWith("[未対応") || file.content.startsWith("[PDF本文抽出には"),
+    )
     .map((file) => file.path);
   const items = {
     document_uris: [...inputs.documentUris],
@@ -240,8 +272,15 @@ function buildDocumentOverview(inputs) {
   return [lines.join("\n"), items];
 }
 
-function collectDependencies(files) {
-  const dependencies = [];
+interface Dependency {
+  kind: string;
+  name: string;
+  version: string;
+  path: string;
+}
+
+function collectDependencies(files: Array<{ path: string; content: string }>): Dependency[] {
+  const dependencies: Dependency[] = [];
   for (const file of files) {
     const name = path.basename(file.path).toLowerCase();
     if (name === "package.json") {
@@ -259,21 +298,23 @@ function collectDependencies(files) {
   return limitDicts(dependencies, 80);
 }
 
-function dependenciesFromPackageJson(file) {
-  let payload;
+function dependenciesFromPackageJson(file: { path: string; content: string }): Dependency[] {
+  let payload: any;
   try {
     payload = JSON.parse(file.content);
   } catch {
     return [];
   }
 
-  const dependencies = [];
+  const dependencies: Dependency[] = [];
   for (const section of ["dependencies", "devDependencies"]) {
     const values = payload[section];
     if (values == null || typeof values !== "object" || Array.isArray(values)) {
       continue;
     }
-    for (const [name, version] of Object.entries(values).sort(([left], [right]) => left.localeCompare(right))) {
+    for (const [name, version] of Object.entries(values).sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
       dependencies.push({
         kind: section,
         name: String(name),
@@ -285,8 +326,8 @@ function dependenciesFromPackageJson(file) {
   return dependencies;
 }
 
-function dependenciesFromRequirements(file) {
-  const dependencies = [];
+function dependenciesFromRequirements(file: { path: string; content: string }): Dependency[] {
+  const dependencies: Dependency[] = [];
   for (const line of file.content.split(/\r?\n/)) {
     const stripped = line.trim();
     if (!stripped || stripped.startsWith("#") || stripped.startsWith("-")) {
@@ -302,14 +343,19 @@ function dependenciesFromRequirements(file) {
   return dependencies;
 }
 
-function dependenciesFromPyproject(file) {
-  const dependencies = [];
+function dependenciesFromPyproject(file: { path: string; content: string }): Dependency[] {
+  const dependencies: Dependency[] = [];
   let inDependencies = false;
   for (const line of file.content.split(/\r?\n/)) {
     const stripped = line.trim();
     if (stripped.startsWith("dependencies")) {
       inDependencies = stripped.includes("[") && !stripped.includes("]");
-      dependencies.push(...pyprojectDependencyEntries([...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]), file.path));
+      dependencies.push(
+        ...pyprojectDependencyEntries(
+          [...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]),
+          file.path,
+        ),
+      );
       continue;
     }
     if (inDependencies) {
@@ -317,13 +363,18 @@ function dependenciesFromPyproject(file) {
         inDependencies = false;
         continue;
       }
-      dependencies.push(...pyprojectDependencyEntries([...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]), file.path));
+      dependencies.push(
+        ...pyprojectDependencyEntries(
+          [...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]),
+          file.path,
+        ),
+      );
     }
   }
   return dependencies;
 }
 
-function pyprojectDependencyEntries(values, filePath) {
+function pyprojectDependencyEntries(values: string[], filePath: string): Dependency[] {
   return values.map((value) => ({
     kind: "python",
     name: dependencyName(value),
@@ -332,8 +383,8 @@ function pyprojectDependencyEntries(values, filePath) {
   }));
 }
 
-function dependenciesFromGoMod(file) {
-  const dependencies = [];
+function dependenciesFromGoMod(file: { path: string; content: string }): Dependency[] {
+  const dependencies: Dependency[] = [];
   for (let line of file.content.split(/\r?\n/)) {
     line = line.trim();
     if (!line || line.startsWith("//")) {
@@ -358,17 +409,25 @@ function dependenciesFromGoMod(file) {
   return dependencies;
 }
 
-function dependenciesFromGemfile(file) {
-  return [...file.content.matchAll(/^\s*gem\s+['"]([^'"]+)['"](?:,\s*['"]([^'"]+)['"])?/gm)].map((match) => ({
-    kind: "ruby",
-    name: match[1],
-    version: match[2] || "",
-    path: file.path,
-  }));
+function dependenciesFromGemfile(file: { path: string; content: string }): Dependency[] {
+  return [...file.content.matchAll(/^\s*gem\s+['"]([^'"]+)['"](?:,\s*['"]([^'"]+)['"])?/gm)].map(
+    (match) => ({
+      kind: "ruby",
+      name: match[1],
+      version: match[2] || "",
+      path: file.path,
+    }),
+  );
 }
 
-function collectApiRoutes(files) {
-  const routes = [];
+interface Route {
+  method: string;
+  path: string;
+  source: string;
+}
+
+function collectApiRoutes(files: Array<{ path: string; content: string }>): Route[] {
+  const routes: Route[] = [];
   for (const file of files) {
     if (isTestFile(file.path)) {
       continue;
@@ -379,8 +438,8 @@ function collectApiRoutes(files) {
   return limitDicts(routes, 80);
 }
 
-function routesFromContent(file) {
-  const routes = [];
+function routesFromContent(file: { path: string; content: string }): Route[] {
+  const routes: Route[] = [];
   file.content.split(/\r?\n/).forEach((line, index) => {
     const lineNumber = index + 1;
     const stripped = line.trim();
@@ -393,12 +452,14 @@ function routesFromContent(file) {
   return routes;
 }
 
-function matchPythonRoute(filePath, lineNumber, line) {
-  const match = line.match(/^@(?:\w+\.)?(?:app|router|api)\.(get|post|put|delete|patch|options|head)\(\s*['"]([^'"]+)['"]/);
+function matchPythonRoute(filePath: string, lineNumber: number, line: string): Route[] {
+  const match = line.match(
+    /^@(?:\w+\.)?(?:app|router|api)\.(get|post|put|delete|patch|options|head)\(\s*['"]([^'"]+)['"]/,
+  );
   return match ? [routeDict(match[1].toUpperCase(), match[2], filePath, lineNumber)] : [];
 }
 
-function matchFlaskRoute(filePath, lineNumber, line) {
+function matchFlaskRoute(filePath: string, lineNumber: number, line: string): Route[] {
   const match = line.match(/^@(?:\w+\.)?(?:app|bp|blueprint)\.route\(\s*['"]([^'"]+)['"]/);
   if (!match) {
     return [];
@@ -412,28 +473,46 @@ function matchFlaskRoute(filePath, lineNumber, line) {
   );
 }
 
-function matchExpressRoute(filePath, lineNumber, line) {
-  const match = line.match(/\b(?:app|router)\.(get|post|put|delete|patch|options|head|all|use)\(\s*[`'"]([^`'"]+)[`'"]/);
+function matchExpressRoute(filePath: string, lineNumber: number, line: string): Route[] {
+  const match = line.match(
+    /\b(?:app|router)\.(get|post|put|delete|patch|options|head|all|use)\(\s*[`'"]([^`'"]+)[`'"]/,
+  );
   return match ? [routeDict(match[1].toUpperCase(), match[2], filePath, lineNumber)] : [];
 }
 
-function matchDjangoRoute(filePath, lineNumber, line) {
+function matchDjangoRoute(filePath: string, lineNumber: number, line: string): Route[] {
   const match = line.match(/\b(?:path|re_path)\(\s*['"]([^'"]+)['"]/);
   return match ? [routeDict("DJANGO", match[1], filePath, lineNumber)] : [];
 }
 
-function matchSpringRoute(filePath, lineNumber, line) {
-  const match = line.match(/@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)(?:\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"])?/);
+function matchSpringRoute(filePath: string, lineNumber: number, line: string): Route[] {
+  const match = line.match(
+    /@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)(?:\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"])?/,
+  );
   if (!match) {
     return [];
   }
-  return [routeDict(match[1].replace("Mapping", "").toUpperCase() || "REQUEST", match[2] || "", filePath, lineNumber)];
+  return [
+    routeDict(
+      match[1].replace("Mapping", "").toUpperCase() || "REQUEST",
+      match[2] || "",
+      filePath,
+      lineNumber,
+    ),
+  ];
 }
 
-function routesFromPath(filePath) {
+function routesFromPath(filePath: string): Route[] {
   const normalized = filePath.replaceAll("\\", "/");
   if (normalized.startsWith("pages/api/")) {
-    return [routeDict("NEXT_API", `/${removeExtension(normalized.slice("pages/api/".length))}`, filePath, 0)];
+    return [
+      routeDict(
+        "NEXT_API",
+        `/${removeExtension(normalized.slice("pages/api/".length))}`,
+        filePath,
+        0,
+      ),
+    ];
   }
   if (normalized.includes("/app/api/") && normalized.endsWith("/route.ts")) {
     const route = normalized.split("/app/api/", 2)[1].slice(0, -"/route.ts".length);
@@ -442,8 +521,15 @@ function routesFromPath(filePath) {
   return [];
 }
 
-function collectDatabaseDefinitions(files) {
-  const definitions = [];
+interface DbDefinition {
+  kind: string;
+  name: string;
+  path: string;
+  line: string;
+}
+
+function collectDatabaseDefinitions(files: Array<{ path: string; content: string }>): DbDefinition[] {
+  const definitions: DbDefinition[] = [];
   for (const file of files) {
     if (!isTestFile(file.path)) {
       definitions.push(...databaseDefinitionsFromContent(file));
@@ -452,12 +538,14 @@ function collectDatabaseDefinitions(files) {
   return limitDicts(definitions, 80);
 }
 
-function databaseDefinitionsFromContent(file) {
-  const definitions = [];
+function databaseDefinitionsFromContent(file: { path: string; content: string }): DbDefinition[] {
+  const definitions: DbDefinition[] = [];
   file.content.split(/\r?\n/).forEach((line, index) => {
     const lineNumber = index + 1;
     const stripped = line.trim();
-    const sqlMatch = stripped.match(/\b(CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+INDEX)\s+([^\s(]+)/i);
+    const sqlMatch = stripped.match(
+      /\b(CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+INDEX)\s+([^\s(]+)/i,
+    );
     if (sqlMatch) {
       definitions.push({
         kind: sqlMatch[1].toUpperCase(),
@@ -490,11 +578,11 @@ function databaseDefinitionsFromContent(file) {
   return definitions;
 }
 
-function dependencyName(requirement) {
+function dependencyName(requirement: string): string {
   return requirement.split(/\s*(?:==|>=|<=|~=|!=|>|<|\[)/, 1)[0].trim();
 }
 
-function routeDict(method, routePath, filePath, lineNumber) {
+function routeDict(method: string, routePath: string, filePath: string, lineNumber: number): Route {
   return {
     method,
     path: routePath,
@@ -502,11 +590,11 @@ function routeDict(method, routePath, filePath, lineNumber) {
   };
 }
 
-function sourceReference(filePath, lineNumber) {
+function sourceReference(filePath: string, lineNumber: number): string {
   return lineNumber <= 0 ? filePath : `${filePath}:${lineNumber}`;
 }
 
-function isConfigFile(filePath) {
+function isConfigFile(filePath: string): boolean {
   const name = path.basename(filePath).toLowerCase();
   const suffix = path.extname(filePath).toLowerCase();
   return (
@@ -526,10 +614,10 @@ function isConfigFile(filePath) {
   );
 }
 
-function isTestFile(filePath) {
+function isTestFile(filePath: string): boolean {
   const normalized = filePath.replaceAll("\\", "/").toLowerCase();
   const parts = normalized.split("/");
-  const name = parts.at(-1);
+  const name = parts.at(-1) || "";
   return (
     parts.slice(0, -1).some((part) => ["test", "tests", "spec", "specs"].includes(part)) ||
     name.startsWith("test_") ||
@@ -539,22 +627,24 @@ function isTestFile(filePath) {
   );
 }
 
-function formatBullets(values, empty) {
+function formatBullets(values: string[], empty: string): string[] {
   return values.length === 0 ? [empty] : values.map((value) => `- ${value}`);
 }
 
-function formatDependencyTable(dependencies) {
+function formatDependencyTable(dependencies: Dependency[]): string[] {
   if (dependencies.length === 0) {
     return ["依存関係候補は検出されませんでした。"];
   }
   return [
     "| 種別 | 名前 | バージョン/記述 | 根拠 |",
     "| --- | --- | --- | --- |",
-    ...dependencies.map((item) => `| ${item.kind} | ${item.name} | ${item.version} | ${item.path} |`),
+    ...dependencies.map(
+      (item) => `| ${item.kind} | ${item.name} | ${item.version} | ${item.path} |`,
+    ),
   ];
 }
 
-function formatRouteTable(routes) {
+function formatRouteTable(routes: Route[]): string[] {
   if (routes.length === 0) {
     return ["ルーティング/API候補は検出されませんでした。"];
   }
@@ -565,7 +655,7 @@ function formatRouteTable(routes) {
   ];
 }
 
-function formatDatabaseTable(definitions) {
+function formatDatabaseTable(definitions: DbDefinition[]): string[] {
   if (definitions.length === 0) {
     return ["DB定義/データモデル候補は検出されませんでした。"];
   }
@@ -576,18 +666,20 @@ function formatDatabaseTable(definitions) {
   ];
 }
 
-function formatDocumentTable(files) {
+function formatDocumentTable(files: Array<{ path: string; content: string }>): string[] {
   if (files.length === 0) {
     return ["本文抽出済みファイルはありません。"];
   }
   return [
     "| ファイル | 文字数 | 状態 |",
     "| --- | ---: | --- |",
-    ...files.map((file) => `| ${file.path} | ${file.content.length} | ${documentStatus(file)} |`),
+    ...files.map(
+      (file) => `| ${file.path} | ${file.content.length} | ${documentStatus(file)} |`,
+    ),
   ];
 }
 
-function documentStatus(file) {
+function documentStatus(file: { content: string }): string {
   if (file.content.startsWith("[未対応")) {
     return "未対応形式";
   }
@@ -600,29 +692,18 @@ function documentStatus(file) {
   return "抽出済み";
 }
 
-function limitDicts(items, maxItems) {
+function limitDicts<T>(items: T[], maxItems: number): T[] {
   return items.slice(0, maxItems);
 }
 
-function joinSections(...sections) {
-  return `${sections.map((section) => section.trim()).filter(Boolean).join("\n\n")}\n`;
+function joinSections(...sections: string[]): string {
+  return `${sections
+    .map((section) => section.trim())
+    .filter(Boolean)
+    .join("\n\n")}\n`;
 }
 
-function removeExtension(value) {
+function removeExtension(value: string): string {
   const index = value.lastIndexOf(".");
   return index < 0 ? value : value.slice(0, index);
 }
-
-module.exports = {
-  GeminiDocumentExtractionEngine,
-  GeminiDriftReportGenerator,
-  GeminiSourceCodeAnalysisEngine,
-  GeminiTrueDesignGenerator,
-  PlaceholderDocumentExtractionEngine,
-  PlaceholderDriftReportGenerator,
-  PlaceholderSourceCodeAnalysisEngine,
-  PlaceholderTrueDesignGenerator,
-  buildDocumentOverview,
-  buildSourceCodeOverview,
-  generatedArtifacts,
-};

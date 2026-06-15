@@ -1,17 +1,16 @@
-"use strict";
-
-const {
+import {
   GeminiDocumentExtractionEngine,
   GeminiDriftReportGenerator,
   GeminiSourceCodeAnalysisEngine,
   GeminiTrueDesignGenerator,
-} = require("./engines");
-const { buildGeminiClient, GeminiSettings } = require("./gemini");
-const { AnalysisOrchestrator } = require("./orchestrator");
-const { FirestoreJobRepository } = require("./repositories");
-const { GcsArtifactWriter, GcsInputLoader } = require("./storage");
+} from "./engines.js";
+import { buildGeminiClient, GeminiSettings } from "./gemini.js";
+import { AnalysisOrchestrator } from "./orchestrator.js";
+import { FirestoreJobRepository } from "./repositories.js";
+import { GcsArtifactWriter, GcsInputLoader } from "./storage.js";
+import { WorkerConfig } from "./config.js";
 
-function buildOrchestrator(config) {
+export function buildOrchestrator(config: WorkerConfig): AnalysisOrchestrator {
   const geminiClient = buildGeminiClient(
     new GeminiSettings({
       apiKey: config.geminiApiKey,
@@ -33,7 +32,3 @@ function buildOrchestrator(config) {
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
   });
 }
-
-module.exports = {
-  buildOrchestrator,
-};

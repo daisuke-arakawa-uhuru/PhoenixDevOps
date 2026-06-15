@@ -1,18 +1,21 @@
-"use strict";
-
-const zlib = require("node:zlib");
+import zlib from "node:zlib";
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
 const LOCAL_FILE_SIGNATURE = 0x04034b50;
 
-function readZipEntries(buffer) {
+export interface ZipEntry {
+  name: string;
+  data: Buffer;
+}
+
+export function readZipEntries(buffer: Buffer | Uint8Array): ZipEntry[] {
   const archive = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   const eocdOffset = findEndOfCentralDirectory(archive);
   const centralDirectorySize = archive.readUInt32LE(eocdOffset + 12);
   const centralDirectoryOffset = archive.readUInt32LE(eocdOffset + 16);
   const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
-  const entries = [];
+  const entries: ZipEntry[] = [];
 
   let offset = centralDirectoryOffset;
   while (offset < centralDirectoryEnd) {
@@ -26,9 +29,7 @@ function readZipEntries(buffer) {
     const extraFieldLength = archive.readUInt16LE(offset + 30);
     const commentLength = archive.readUInt16LE(offset + 32);
     const localHeaderOffset = archive.readUInt32LE(offset + 42);
-    const fileName = archive
-      .subarray(offset + 46, offset + 46 + fileNameLength)
-      .toString("utf8");
+    const fileName = archive.subarray(offset + 46, offset + 46 + fileNameLength).toString("utf8");
 
     if (!fileName.endsWith("/")) {
       entries.push({
@@ -43,7 +44,12 @@ function readZipEntries(buffer) {
   return entries;
 }
 
-function readZipEntryData(archive, localHeaderOffset, compressionMethod, compressedSize) {
+function readZipEntryData(
+  archive: Buffer,
+  localHeaderOffset: number,
+  compressionMethod: number,
+  compressedSize: number,
+): Buffer {
   if (archive.readUInt32LE(localHeaderOffset) !== LOCAL_FILE_SIGNATURE) {
     throw new Error("Invalid ZIP local file header");
   }
@@ -62,7 +68,7 @@ function readZipEntryData(archive, localHeaderOffset, compressionMethod, compres
   throw new Error(`Unsupported ZIP compression method: ${compressionMethod}`);
 }
 
-function findEndOfCentralDirectory(archive) {
+function findEndOfCentralDirectory(archive: Buffer): number {
   const minOffset = Math.max(0, archive.length - 0xffff - 22);
   for (let offset = archive.length - 22; offset >= minOffset; offset -= 1) {
     if (archive.readUInt32LE(offset) === EOCD_SIGNATURE) {
@@ -71,7 +77,3 @@ function findEndOfCentralDirectory(archive) {
   }
   throw new Error("ZIP end of central directory not found");
 }
-
-module.exports = {
-  readZipEntries,
-};

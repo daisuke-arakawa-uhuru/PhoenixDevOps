@@ -1,22 +1,29 @@
-"use strict";
-
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const path = require("node:path");
-const { WorkerConfig } = require("./config");
-const {
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { WorkerConfig } from "./config.js";
+import {
   GeminiDocumentExtractionEngine,
   GeminiDriftReportGenerator,
   GeminiSourceCodeAnalysisEngine,
   GeminiTrueDesignGenerator,
-} = require("./engines");
-const { buildGeminiClient, GeminiSettings } = require("./gemini");
-const { AnalysisOrchestrator } = require("./orchestrator");
-const { AnalysisTaskPayload, StorageObjectRef } = require("./payload");
-const { InMemoryJobRepository } = require("./repositories");
-const { LocalArtifactWriter, LocalFileInputLoader } = require("./storage");
+} from "./engines.js";
+import { buildGeminiClient, GeminiSettings } from "./gemini.js";
+import { AnalysisOrchestrator } from "./orchestrator.js";
+import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
+import { InMemoryJobRepository } from "./repositories.js";
+import { LocalArtifactWriter, LocalFileInputLoader } from "./storage.js";
 
-async function main(argv = process.argv.slice(2)) {
+interface Args {
+  source: string;
+  documents: string[];
+  output: string;
+  projectName: string | null;
+  jobId: string | null;
+  dryRun: boolean;
+}
+
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
   const config = WorkerConfig.fromEnv(process.env);
   const geminiClient = buildGeminiClient(
@@ -50,8 +57,9 @@ async function main(argv = process.argv.slice(2)) {
   process.stdout.write(`${JSON.stringify(result.toResponse(), null, 2)}\n`);
 }
 
-function parseArgs(argv) {
-  const args = {
+export function parseArgs(argv: string[]): Args {
+  const args: Args = {
+    source: "",
     documents: [],
     output: "output",
     projectName: null,
@@ -108,14 +116,10 @@ function parseArgs(argv) {
   return args;
 }
 
-if (require.main === module) {
+// Check if this script is being run directly
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith("local-runner.ts") || process.argv[1].endsWith("local-runner.js")) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   });
 }
-
-module.exports = {
-  main,
-  parseArgs,
-};

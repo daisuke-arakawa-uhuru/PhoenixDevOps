@@ -1,6 +1,6 @@
 name: Terraform Apply (dev)
 
-# master へマージ（infra 変更を含む push）されたら apply する。
+# master へマージ（infra または analysis-worker 変更を含む push）されたら apply する。
 # 誤適用を防ぐため GitHub Environment "dev" の承認（必要なら）を通す。
 # 手動実行（workflow_dispatch）も可能。
 
@@ -8,6 +8,7 @@ on:
   push:
     branches: [master]
     paths:
+      - "apps/analysis-worker/**"
       - "infra/terraform/**"
       - ".github/workflows/terraform-apply.yml"
   workflow_dispatch:
