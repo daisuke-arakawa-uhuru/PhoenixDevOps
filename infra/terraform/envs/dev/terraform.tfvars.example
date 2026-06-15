@@ -55,6 +55,19 @@ api_uploads_prefix_template           = "uploads/{upload_id}"
 api_results_prefix_template           = "results/{job_id}"
 api_max_document_files                = 600
 
+# Web UI Cloud Functions
+ui_bucket_name                       = null
+ui_function_name                     = "phoenixdevops-dev-ui"
+ui_runtime                           = "nodejs24"
+ui_available_memory                  = "256Mi"
+ui_available_cpu                     = "1"
+ui_timeout_seconds                   = 60
+ui_min_instance_count                = 0
+ui_max_instance_count                = 3
+ui_max_instance_request_concurrency = 80
+ui_allow_unauthenticated             = true
+ui_use_mock                          = false
+
 # Gemini API key は実値を tfvars に書かない。Secret Manager の secret ID のみ指定する。
 # 未指定時は GEMINI_API_KEY を設定せず、アプリ側の dry-run client にフォールバックする。
 gemini_api_key_secret_id      = "gemini-api-key"

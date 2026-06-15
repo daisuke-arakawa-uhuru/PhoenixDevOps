@@ -14,7 +14,7 @@ PhoenixDevOps の GCP リソースを Terraform で管理します。**コンソ
 | Firestore | `(default)` DB + `jobs` 複合インデックス | [modules/firestore](terraform/modules/firestore) |
 | Cloud Functions | HTTP API `*-api` + 実行 SA | [modules/api](terraform/modules/api) |
 | Cloud Functions | 解析ワーカー `*-analysis-worker` + 実行/呼び出し SA | [modules/analysis_worker](terraform/modules/analysis_worker) |
-| Cloud Storage static website | Web UI hosting `*-ui` バケット + runtime config `config.js` | [modules/ui_hosting](terraform/modules/ui_hosting) |
+| Cloud Functions | Web UI `*-ui` + source archive bucket + runtime config `/config.js` | [modules/ui_hosting](terraform/modules/ui_hosting) |
 
 > Firestore の `jobs` コレクション設計は [documents/design/firestore-jobs.md](../documents/design/firestore-jobs.md) を参照。
 > GCP プロジェクト本体・API 有効化・Gemini/Secret Manager は **山本担当**（別途）。
@@ -133,12 +133,21 @@ UI は `GET /jobs/{jobId}/results` で受け取った署名付き GCS URL をブ
 
 ### Web UI hosting のデプロイ設定
 
-Web UI は [modules/ui_hosting](terraform/modules/ui_hosting) で Cloud Storage static website として管理します。
-Terraform output の `ui_hosting_website_url` または `ui_hosting_index_url` がアクセス URL です。
+Web UI は [modules/ui_hosting](terraform/modules/ui_hosting) で Cloud Functions Gen2 として管理します。
+Terraform output の `ui_function_uri` または互換用の `ui_hosting_website_url` がアクセス URL です。
 
-Vite の `.env` は build-time に固定されるため、デプロイ環境では Terraform が `config.js` を生成し、
-`module.api.function_uri` を `window.__PHOENIX_CONFIG__.API_URL` として配信します。これにより、UI build 後でも
-HTTP API URL を Terraform state に合わせて差し替えられます。
+Cloud Functions Gen2 は内部的に Cloud Run service を作成します。dev では UI の静的 assets を並列配信できるよう
+`ui_available_cpu = "1"`、`ui_max_instance_request_concurrency = 80` を明示します。Cloud Run は CPU が 1 未満の場合
+concurrency を 1 にする必要があるため、この制約は [modules/ui_hosting](terraform/modules/ui_hosting) の
+precondition でも検出します。
+
+Vite の `.env` は build-time に固定されるため、デプロイ環境では Cloud Functions が `/config.js` を動的生成し、
+Terraform から渡した `module.api.function_uri` を `window.__PHOENIX_CONFIG__.API_URL` として配信します。
+これにより、UI build 後でも HTTP API URL を Terraform state に合わせて差し替えられます。
+
+当初は Cloud Storage static website も選択肢でしたが、dev プロジェクトでは Public Access Prevention が
+enforced になっており GCS bucket に `allUsers` を付与できません。そのため、公開エンドポイントは
+Cloud Functions / Cloud Run の invoker IAM で管理します。
 
 Terraform plan/apply workflow は `apps/ui` を build してから plan/apply します。ローカルで UI hosting まで
 plan/apply する場合も、事前に以下を実行して `apps/ui/dist` を作成してください。
@@ -148,9 +157,6 @@ cd apps/ui
 npm ci
 npm run build
 ```
-
-`ui_deploy_dist = false` を指定すると、hosting bucket と `config.js` だけを Terraform 管理し、静的ファイルの
-アップロードは行いません。
 
 ## CI のゲート（重要）
 

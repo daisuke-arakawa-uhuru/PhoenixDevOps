@@ -4,14 +4,14 @@ variable "project_id" {
 }
 
 variable "bucket_name" {
-  description = "Web UI 静的ホスティング用バケット名（グローバル一意）"
+  description = "Web UI Cloud Functions source archive 用 GCS バケット名（グローバル一意）"
   type        = string
 }
 
 variable "location" {
-  description = "バケットのロケーション"
+  description = "Web UI Cloud Functions のリージョン"
   type        = string
-  default     = "ASIA-NORTHEAST1"
+  default     = "asia-northeast1"
 }
 
 variable "force_destroy" {
@@ -20,21 +20,91 @@ variable "force_destroy" {
   default     = false
 }
 
-variable "allow_public_access" {
-  description = "true の場合、静的 UI を allUsers に公開する"
-  type        = bool
-  default     = true
+variable "source_bucket_location" {
+  description = "Web UI Cloud Functions source archive 用 GCS バケットのロケーション"
+  type        = string
+  default     = "ASIA-NORTHEAST1"
 }
 
-variable "dist_dir" {
-  description = "アップロードする UI build 成果物ディレクトリ"
+variable "function_name" {
+  description = "Web UI Cloud Functions 名"
   type        = string
 }
 
-variable "deploy_dist" {
-  description = "true の場合、dist_dir 配下のファイルを hosting bucket にアップロードする"
+variable "runtime" {
+  description = "Web UI Cloud Functions runtime"
+  type        = string
+  default     = "nodejs24"
+}
+
+variable "entry_point" {
+  description = "Web UI Cloud Functions entry point"
+  type        = string
+  default     = "serveUi"
+}
+
+variable "allow_unauthenticated" {
+  description = "true の場合、Web UI を unauthenticated で呼び出せるようにする"
   type        = bool
   default     = true
+}
+
+variable "source_dir" {
+  description = "Web UI Cloud Functions source directory"
+  type        = string
+}
+
+variable "available_memory" {
+  description = "Web UI Cloud Functions に割り当てるメモリ"
+  type        = string
+  default     = "256Mi"
+}
+
+variable "available_cpu" {
+  description = "Web UI Cloud Functions に割り当てる CPU。concurrency > 1 の場合は 1 以上が必要。"
+  type        = string
+  default     = "1"
+
+  validation {
+    condition     = can(tonumber(var.available_cpu)) && tonumber(var.available_cpu) >= 0.08 && tonumber(var.available_cpu) <= 8
+    error_message = "available_cpu must be a numeric string between 0.08 and 8."
+  }
+}
+
+variable "timeout_seconds" {
+  description = "Web UI Cloud Functions のタイムアウト秒数"
+  type        = number
+  default     = 60
+}
+
+variable "min_instance_count" {
+  description = "Web UI Cloud Functions の最小インスタンス数"
+  type        = number
+  default     = 0
+}
+
+variable "max_instance_count" {
+  description = "Web UI Cloud Functions の最大インスタンス数"
+  type        = number
+  default     = 3
+}
+
+variable "max_instance_request_concurrency" {
+  description = "Web UI 1 インスタンスあたりの最大同時リクエスト数"
+  type        = number
+  default     = 80
+}
+
+variable "ingress_settings" {
+  description = "Web UI Cloud Functions の ingress 設定"
+  type        = string
+  default     = "ALLOW_ALL"
+}
+
+variable "source_archive_retention_days" {
+  description = "Web UI source archive の保持日数"
+  type        = number
+  default     = 30
 }
 
 variable "api_url" {
@@ -46,10 +116,4 @@ variable "use_mock" {
   description = "配信環境で UI のモックモードを有効化するか"
   type        = bool
   default     = false
-}
-
-variable "runtime_config_object_name" {
-  description = "runtime config JavaScript のオブジェクト名"
-  type        = string
-  default     = "config.js"
 }

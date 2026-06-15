@@ -69,21 +69,21 @@ output "api_service_account_email" {
 }
 
 output "ui_hosting_bucket_name" {
-  description = "Web UI 静的ホスティング用 GCS バケット名"
+  description = "Web UI Cloud Functions source archive 用 GCS バケット名"
   value       = module.ui_hosting.bucket_name
 }
 
+output "ui_function_name" {
+  description = "Web UI Cloud Functions 名"
+  value       = module.ui_hosting.function_name
+}
+
+output "ui_function_uri" {
+  description = "Web UI HTTPS URI"
+  value       = module.ui_hosting.function_uri
+}
+
 output "ui_hosting_website_url" {
-  description = "Web UI の GCS website endpoint URL"
-  value       = module.ui_hosting.website_url
-}
-
-output "ui_hosting_index_url" {
-  description = "Web UI の index.html 直リンク"
-  value       = module.ui_hosting.index_url
-}
-
-output "ui_runtime_config_object_name" {
-  description = "Terraform が生成する Web UI runtime config JavaScript"
-  value       = module.ui_hosting.runtime_config_object_name
+  description = "Web UI HTTPS URI（互換用 output）"
+  value       = module.ui_hosting.function_uri
 }

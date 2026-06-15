@@ -1,24 +1,24 @@
 output "bucket_name" {
-  description = "Web UI 静的ホスティング用バケット名"
+  description = "Web UI Cloud Functions source archive 用 GCS バケット名"
   value       = google_storage_bucket.ui.name
 }
 
 output "bucket_url" {
-  description = "Web UI 静的ホスティング用バケット URL"
+  description = "Web UI Cloud Functions source archive 用 GCS バケット URL"
   value       = google_storage_bucket.ui.url
 }
 
-output "website_url" {
-  description = "Web UI の GCS website endpoint URL"
-  value       = "http://${google_storage_bucket.ui.name}.storage.googleapis.com"
+output "function_name" {
+  description = "Web UI Cloud Functions 名"
+  value       = google_cloudfunctions2_function.ui.name
 }
 
-output "index_url" {
-  description = "Web UI の index.html 直リンク"
-  value       = "https://storage.googleapis.com/${google_storage_bucket.ui.name}/index.html"
+output "function_uri" {
+  description = "Web UI HTTPS URI"
+  value       = google_cloudfunctions2_function.ui.service_config[0].uri
 }
 
-output "runtime_config_object_name" {
-  description = "Terraform が生成する runtime config JavaScript"
-  value       = google_storage_bucket_object.runtime_config.name
+output "source_archive_name" {
+  description = "Web UI source archive object name"
+  value       = google_storage_bucket_object.source_archive.name
 }

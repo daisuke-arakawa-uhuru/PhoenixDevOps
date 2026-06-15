@@ -1,77 +1,113 @@
 locals {
-  dist_files = var.deploy_dist ? try(fileset(var.dist_dir, "**"), []) : []
-
-  content_types = {
-    css   = "text/css; charset=utf-8"
-    gif   = "image/gif"
-    html  = "text/html; charset=utf-8"
-    ico   = "image/x-icon"
-    jpg   = "image/jpeg"
-    jpeg  = "image/jpeg"
-    js    = "text/javascript; charset=utf-8"
-    json  = "application/json; charset=utf-8"
-    map   = "application/json; charset=utf-8"
-    png   = "image/png"
-    svg   = "image/svg+xml"
-    txt   = "text/plain; charset=utf-8"
-    webp  = "image/webp"
-    woff  = "font/woff"
-    woff2 = "font/woff2"
-  }
-
-  dist_file_extensions = {
-    for file_name in local.dist_files :
-    file_name => lower(element(split(".", file_name), length(split(".", file_name)) - 1))
-  }
+  source_archive_output_path = "${path.root}/.terraform/${var.function_name}.zip"
+  source_archive_name        = "functions/${var.function_name}/${data.archive_file.source.output_sha256}.zip"
 }
 
 resource "google_storage_bucket" "ui" {
   project       = var.project_id
   name          = var.bucket_name
-  location      = var.location
+  location      = var.source_bucket_location
   force_destroy = var.force_destroy
 
   uniform_bucket_level_access = true
-  public_access_prevention    = var.allow_public_access ? "inherited" : "enforced"
+  public_access_prevention    = "enforced"
 
-  website {
-    main_page_suffix = "index.html"
-    not_found_page   = "index.html"
+  lifecycle_rule {
+    condition {
+      age            = var.source_archive_retention_days
+      matches_prefix = ["functions/${var.function_name}/"]
+    }
+    action {
+      type = "Delete"
+    }
   }
 }
 
-resource "google_storage_bucket_iam_member" "public_viewer" {
-  count = var.allow_public_access ? 1 : 0
+data "archive_file" "source" {
+  type             = "zip"
+  source_dir       = var.source_dir
+  output_path      = local.source_archive_output_path
+  output_file_mode = "0644"
 
-  bucket = google_storage_bucket.ui.name
-  role   = "roles/storage.objectViewer"
-  member = "allUsers"
+  excludes = [
+    ".env",
+    ".env.*",
+    ".DS_Store",
+    "coverage/**",
+    "node_modules/**",
+  ]
 }
 
-resource "google_storage_bucket_object" "runtime_config" {
-  bucket = google_storage_bucket.ui.name
-  name   = var.runtime_config_object_name
-
-  content = "window.__PHOENIX_CONFIG__ = ${jsonencode({
-    API_URL  = var.api_url
-    USE_MOCK = var.use_mock
-  })};\n"
-
-  content_type  = "text/javascript; charset=utf-8"
-  cache_control = "no-store"
+resource "google_storage_bucket_object" "source_archive" {
+  name         = local.source_archive_name
+  bucket       = google_storage_bucket.ui.name
+  source       = data.archive_file.source.output_path
+  content_type = "application/zip"
 }
 
-resource "google_storage_bucket_object" "dist" {
-  for_each = {
-    for file_name in local.dist_files :
-    file_name => file_name
-    if file_name != var.runtime_config_object_name
+resource "google_cloudfunctions2_function" "ui" {
+  project     = var.project_id
+  name        = var.function_name
+  location    = var.location
+  description = "PhoenixDevOps Web UI"
+
+  build_config {
+    runtime     = var.runtime
+    entry_point = var.entry_point
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.ui.name
+        object = google_storage_bucket_object.source_archive.name
+      }
+    }
   }
 
-  bucket = google_storage_bucket.ui.name
-  name   = each.value
-  source = "${var.dist_dir}/${each.value}"
+  service_config {
+    available_memory                 = var.available_memory
+    available_cpu                    = var.available_cpu
+    timeout_seconds                  = var.timeout_seconds
+    min_instance_count               = var.min_instance_count
+    max_instance_count               = var.max_instance_count
+    max_instance_request_concurrency = var.max_instance_request_concurrency
+    ingress_settings                 = var.ingress_settings
+    all_traffic_on_latest_revision   = true
 
-  content_type  = lookup(local.content_types, local.dist_file_extensions[each.value], "application/octet-stream")
-  cache_control = startswith(each.value, "assets/") ? "public, max-age=31536000, immutable" : "no-cache"
+    environment_variables = {
+      API_URL  = var.api_url
+      USE_MOCK = tostring(var.use_mock)
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = tonumber(var.available_cpu) >= 1 || var.max_instance_request_concurrency == 1
+      error_message = "Cloud Run requires max_instance_request_concurrency = 1 when available_cpu is less than 1."
+    }
+
+    precondition {
+      condition     = fileexists("${var.source_dir}/dist/index.html")
+      error_message = "Web UI build output is missing. Run `npm ci && npm run build` in apps/ui before Terraform plan/apply."
+    }
+  }
+}
+
+resource "google_cloudfunctions2_function_iam_member" "public_invoker" {
+  count = var.allow_unauthenticated ? 1 : 0
+
+  project        = google_cloudfunctions2_function.ui.project
+  location       = google_cloudfunctions2_function.ui.location
+  cloud_function = google_cloudfunctions2_function.ui.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = "allUsers"
+}
+
+resource "google_cloud_run_service_iam_member" "public_invoker" {
+  count = var.allow_unauthenticated ? 1 : 0
+
+  project  = google_cloudfunctions2_function.ui.project
+  location = google_cloudfunctions2_function.ui.location
+  service  = google_cloudfunctions2_function.ui.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }

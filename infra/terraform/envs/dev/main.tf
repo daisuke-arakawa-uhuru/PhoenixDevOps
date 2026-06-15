@@ -103,21 +103,33 @@ module "api" {
   ]
 }
 
-# === Cloud Storage static website: Web UI ===
+# === Cloud Functions: Web UI ===
 # Vite の .env は build-time 固定のため、デプロイ後に API URL を差し替えられるよう
-# Terraform が config.js を生成し、ブラウザ実行時に読み込ませる。
+# Cloud Functions が config.js を動的生成し、ブラウザ実行時に読み込ませる。
 module "ui_hosting" {
   source = "../../modules/ui_hosting"
 
-  project_id          = var.project_id
-  bucket_name         = coalesce(var.ui_bucket_name, "${local.name_prefix}-ui")
-  location            = var.storage_location
-  force_destroy       = var.ui_force_destroy
-  allow_public_access = var.ui_allow_public_access
+  project_id             = var.project_id
+  bucket_name            = coalesce(var.ui_bucket_name, "${local.name_prefix}-ui")
+  location               = var.region
+  source_bucket_location = var.storage_location
+  force_destroy          = var.ui_force_destroy
 
-  dist_dir    = abspath("${path.root}/../../../../apps/ui/dist")
-  deploy_dist = var.ui_deploy_dist
+  function_name                    = coalesce(var.ui_function_name, "${local.name_prefix}-ui")
+  runtime                          = var.ui_runtime
+  source_dir                       = abspath("${path.root}/../../../../apps/ui")
+  available_memory                 = var.ui_available_memory
+  available_cpu                    = var.ui_available_cpu
+  timeout_seconds                  = var.ui_timeout_seconds
+  min_instance_count               = var.ui_min_instance_count
+  max_instance_count               = var.ui_max_instance_count
+  max_instance_request_concurrency = var.ui_max_instance_request_concurrency
+  allow_unauthenticated            = var.ui_allow_unauthenticated
 
   api_url  = module.api.function_uri
   use_mock = var.ui_use_mock
+
+  depends_on = [
+    module.analysis_worker,
+  ]
 }

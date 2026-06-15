@@ -41,7 +41,8 @@ VITE_API_URL="https://<api-function-url>" npm run dev
 ```
 
 Terraform でホスティングする環境では、`VITE_API_URL` ではなく Terraform が配信する `/config.js` の
-`window.__PHOENIX_CONFIG__.API_URL` を使用します。`config.js` は `infra/terraform/modules/ui_hosting` で生成され、
+`window.__PHOENIX_CONFIG__.API_URL` を使用します。`config.js` は `infra/terraform/modules/ui_hosting` の
+Cloud Functions から動的に配信され、
 値には dev 環境の `module.api.function_uri` が入ります。
 
 ## 🧪 モック検証モード（API不要での確認）
@@ -70,7 +71,8 @@ Terraform でホスティングする環境では、`VITE_API_URL` ではなく 
 
 通常のローカル起動では `VITE_USE_MOCK` を設定しなければ実 API を呼び出します。APIなしでUIだけを確認したい場合は、`?mock=true` または `VITE_USE_MOCK=true` を使ってください。
 
-デプロイ環境の実 API URL は `.env` ではなく、Terraform が hosting bucket に配置する `config.js` で設定します。
+デプロイ環境の実 API URL は `.env` ではなく、Terraform が Web UI Cloud Functions の環境変数として渡し、
+`/config.js` でブラウザへ公開します。
 
 ---
 
