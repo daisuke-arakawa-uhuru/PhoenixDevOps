@@ -21,10 +21,9 @@ export async function runAnalysisWorker(req: Request, res: Response): Promise<vo
     throw error;
   }
 
-  const config = WorkerConfig.fromEnv(process.env);
-  const orchestrator = buildOrchestrator(config);
-
   try {
+    const config = WorkerConfig.fromEnv(process.env);
+    const orchestrator = buildOrchestrator(config);
     const result = await orchestrator.run(payload);
     res.status(200).json(result.toResponse());
   } catch (error) {

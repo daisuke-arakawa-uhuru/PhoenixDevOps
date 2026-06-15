@@ -9,7 +9,7 @@
     "build": "tsc",
     "gcp-build": "npm run build",
     "start": "functions-framework --target=runAnalysisWorker",
-    "test": "node --test",
+    "test": "npm run build && node --test dist/test/*.js",
     "local": "tsx src/local-runner.ts",
     "type-check": "tsc --noEmit"
   },

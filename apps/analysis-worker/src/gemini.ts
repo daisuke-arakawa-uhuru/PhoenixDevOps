@@ -118,7 +118,7 @@ export class DryRunGeminiClient implements GeminiClient {
 }
 
 export function buildGeminiClient(settings: GeminiSettings): GeminiClient {
-  if (settings.dryRun || !settings.apiKey) {
+  if (settings.dryRun) {
     return new DryRunGeminiClient();
   }
   return new GoogleGenAIClient(settings);
