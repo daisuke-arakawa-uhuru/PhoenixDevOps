@@ -149,15 +149,10 @@ npm run build
 npm test
 ```
 
-## デプロイ例
+## Terraform デプロイ
 
-```bash
-gcloud functions deploy drift-api \
-  --gen2 \
-  --runtime nodejs24 \
-  --region asia-northeast1 \
-  --source apps/api \
-  --entry-point driftApi \
-  --trigger-http \
-  --set-env-vars UPLOADS_BUCKET=phoenix-uploads,FIRESTORE_UPLOADS_COLLECTION=uploads,FIRESTORE_JOBS_COLLECTION=jobs,TASKS_LOCATION=asia-northeast1,TASKS_QUEUE=analysis-jobs,WORKER_URL=https://example-worker-url
-```
+API は [infra/terraform/modules/api](../../infra/terraform/modules/api) で Cloud Functions Gen2 として
+デプロイします。dev 環境では [infra/terraform/envs/dev](../../infra/terraform/envs/dev) の
+`module.api` が Storage / Firestore / Cloud Tasks / 解析ワーカー URL を環境変数として渡します。
+
+デプロイ後は Terraform output の `api_function_uri` を Web UI の API URL として使います。

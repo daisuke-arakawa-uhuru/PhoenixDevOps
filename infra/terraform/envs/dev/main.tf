@@ -64,3 +64,41 @@ module "analysis_worker" {
   gemini_api_key_secret_id      = var.gemini_api_key_secret_id
   gemini_api_key_secret_version = var.gemini_api_key_secret_version
 }
+
+# === Cloud Functions: Web UI から呼び出される HTTP API ===
+module "api" {
+  source = "../../modules/api"
+
+  project_id             = var.project_id
+  location               = var.region
+  function_name          = coalesce(var.api_function_name, "${local.name_prefix}-api")
+  source_dir             = abspath("${path.root}/../../../../apps/api")
+  source_bucket_name     = coalesce(var.api_source_bucket_name, "${local.name_prefix}-api-source")
+  source_bucket_location = var.storage_location
+  assets_bucket_name     = module.storage.bucket_name
+
+  tasks_queue_name                   = module.tasks.queue_name
+  worker_url                         = module.analysis_worker.function_uri
+  task_invoker_service_account_email = module.analysis_worker.task_invoker_service_account_email
+
+  runtime                          = var.api_runtime
+  api_service_account_id           = coalesce(var.api_service_account_id, "pdx-${var.environment}-api")
+  available_memory                 = var.api_available_memory
+  timeout_seconds                  = var.api_timeout_seconds
+  min_instance_count               = var.api_min_instance_count
+  max_instance_count               = var.api_max_instance_count
+  max_instance_request_concurrency = var.api_max_instance_request_concurrency
+  ingress_settings                 = var.api_ingress_settings
+  allow_unauthenticated            = var.api_allow_unauthenticated
+
+  firestore_uploads_collection  = var.firestore_uploads_collection
+  firestore_jobs_collection     = var.firestore_jobs_collection
+  signed_url_expiration_seconds = var.api_signed_url_expiration_seconds
+  uploads_prefix_template       = var.api_uploads_prefix_template
+  results_prefix_template       = var.api_results_prefix_template
+  max_document_files            = var.api_max_document_files
+
+  depends_on = [
+    module.analysis_worker,
+  ]
+}

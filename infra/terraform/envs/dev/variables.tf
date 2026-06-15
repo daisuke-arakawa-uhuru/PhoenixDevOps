@@ -111,10 +111,106 @@ variable "analysis_worker_ingress_settings" {
   default     = "ALLOW_ALL"
 }
 
+variable "api_function_name" {
+  description = "HTTP API Cloud Functions 名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "api_source_bucket_name" {
+  description = "HTTP API Cloud Functions source archive 用 GCS バケット名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "api_runtime" {
+  description = "HTTP API Cloud Functions runtime"
+  type        = string
+  default     = "nodejs24"
+}
+
+variable "api_service_account_id" {
+  description = "HTTP API 実行用サービスアカウント ID（30 文字以内）。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "api_available_memory" {
+  description = "HTTP API Cloud Functions に割り当てるメモリ"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "api_timeout_seconds" {
+  description = "HTTP API Cloud Functions のタイムアウト秒数"
+  type        = number
+  default     = 300
+}
+
+variable "api_min_instance_count" {
+  description = "HTTP API Cloud Functions の最小インスタンス数"
+  type        = number
+  default     = 0
+}
+
+variable "api_max_instance_count" {
+  description = "HTTP API Cloud Functions の最大インスタンス数"
+  type        = number
+  default     = 3
+}
+
+variable "api_max_instance_request_concurrency" {
+  description = "HTTP API 1 インスタンスあたりの最大同時リクエスト数"
+  type        = number
+  default     = 1
+}
+
+variable "api_ingress_settings" {
+  description = "HTTP API Cloud Functions の ingress 設定"
+  type        = string
+  default     = "ALLOW_ALL"
+}
+
+variable "api_allow_unauthenticated" {
+  description = "true の場合、HTTP API を unauthenticated で呼び出せるようにする"
+  type        = bool
+  default     = true
+}
+
+variable "firestore_uploads_collection" {
+  description = "アップロード状態を保存する Firestore コレクション名"
+  type        = string
+  default     = "uploads"
+}
+
 variable "firestore_jobs_collection" {
   description = "解析ジョブ状態を保存する Firestore コレクション名"
   type        = string
   default     = "jobs"
+}
+
+variable "api_signed_url_expiration_seconds" {
+  description = "HTTP API が返す成果物署名付き URL の有効秒数"
+  type        = number
+  default     = 3600
+}
+
+variable "api_uploads_prefix_template" {
+  description = "HTTP API のアップロード保存 prefix template"
+  type        = string
+  default     = "uploads/{upload_id}"
+}
+
+variable "api_results_prefix_template" {
+  description = "HTTP API の成果物保存 prefix template"
+  type        = string
+  default     = "results/{job_id}"
+}
+
+variable "api_max_document_files" {
+  description = "HTTP API が 1 upload で受け付けるドキュメントファイル数上限"
+  type        = number
+  default     = 600
 }
 
 variable "analysis_worker_results_prefix_template" {
