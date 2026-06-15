@@ -1,6 +1,6 @@
 name: Terraform Plan (dev)
 
-# PR で infra / api / analysis-worker の変更が入ったら、fmt/validate/plan を実行して結果を PR にコメントする。
+# PR で infra / api / analysis-worker / ui の変更が入ったら、fmt/validate/plan を実行して結果を PR にコメントする。
 # 認証は Workload Identity 連携（WIF）。長期のサービスアカウントキーは使わない。
 
 on:
@@ -9,6 +9,7 @@ on:
     paths:
       - "apps/api/**"
       - "apps/analysis-worker/**"
+      - "apps/ui/**"
       - "infra/terraform/**"
       - ".github/workflows/terraform-plan.yml"
 
@@ -37,6 +38,19 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/ui/package-lock.json
+
+      - name: Build Web UI
+        working-directory: apps/ui
+        run: |
+          npm ci
+          npm run build
 
       - name: Terraform fmt
         id: fmt

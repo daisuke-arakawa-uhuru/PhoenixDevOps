@@ -67,3 +67,23 @@ output "api_service_account_email" {
   description = "HTTP API 実行用サービスアカウント"
   value       = module.api.service_account_email
 }
+
+output "ui_hosting_bucket_name" {
+  description = "Web UI Cloud Functions source archive 用 GCS バケット名"
+  value       = module.ui_hosting.bucket_name
+}
+
+output "ui_function_name" {
+  description = "Web UI Cloud Functions 名"
+  value       = module.ui_hosting.function_name
+}
+
+output "ui_function_uri" {
+  description = "Web UI HTTPS URI"
+  value       = module.ui_hosting.function_uri
+}
+
+output "ui_hosting_website_url" {
+  description = "Web UI HTTPS URI（互換用 output）"
+  value       = module.ui_hosting.function_uri
+}

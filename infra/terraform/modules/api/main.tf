@@ -101,24 +101,24 @@ resource "google_cloudfunctions2_function" "api" {
   }
 
   service_config {
-    available_memory                = var.available_memory
-    timeout_seconds                 = var.timeout_seconds
-    min_instance_count              = var.min_instance_count
-    max_instance_count              = var.max_instance_count
+    available_memory                 = var.available_memory
+    timeout_seconds                  = var.timeout_seconds
+    min_instance_count               = var.min_instance_count
+    max_instance_count               = var.max_instance_count
     max_instance_request_concurrency = var.max_instance_request_concurrency
-    ingress_settings                = var.ingress_settings
-    all_traffic_on_latest_revision  = true
-    service_account_email           = google_service_account.api.email
+    ingress_settings                 = var.ingress_settings
+    all_traffic_on_latest_revision   = true
+    service_account_email            = google_service_account.api.email
 
     environment_variables = {
       UPLOADS_BUCKET                = var.assets_bucket_name
-      FIRESTORE_UPLOADS_COLLECTION = var.firestore_uploads_collection
-      FIRESTORE_JOBS_COLLECTION    = var.firestore_jobs_collection
-      TASKS_PROJECT_ID             = var.project_id
-      TASKS_LOCATION               = var.location
-      TASKS_QUEUE                  = var.tasks_queue_name
-      WORKER_URL                   = var.worker_url
-      TASKS_SERVICE_ACCOUNT_EMAIL  = var.task_invoker_service_account_email
+      FIRESTORE_UPLOADS_COLLECTION  = var.firestore_uploads_collection
+      FIRESTORE_JOBS_COLLECTION     = var.firestore_jobs_collection
+      TASKS_PROJECT_ID              = var.project_id
+      TASKS_LOCATION                = var.location
+      TASKS_QUEUE                   = var.tasks_queue_name
+      WORKER_URL                    = var.worker_url
+      TASKS_SERVICE_ACCOUNT_EMAIL   = var.task_invoker_service_account_email
       SIGNED_URL_EXPIRATION_SECONDS = tostring(var.signed_url_expiration_seconds)
       UPLOADS_PREFIX_TEMPLATE       = var.uploads_prefix_template
       RESULTS_PREFIX_TEMPLATE       = var.results_prefix_template

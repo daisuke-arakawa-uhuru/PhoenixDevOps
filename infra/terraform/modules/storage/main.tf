@@ -16,6 +16,19 @@ resource "google_storage_bucket" "assets" {
     enabled = true
   }
 
+  # UI は API から取得した署名付き URL を fetch して Markdown をプレビューする。
+  # オブジェクト自体は public_access_prevention と IAM で非公開のまま、署名付き URL の GET だけを許可する。
+  dynamic "cors" {
+    for_each = length(var.cors_origins) > 0 ? [1] : []
+
+    content {
+      origin          = var.cors_origins
+      method          = ["GET", "HEAD"]
+      response_header = ["Content-Type", "Content-Disposition"]
+      max_age_seconds = var.cors_max_age_seconds
+    }
+  }
+
   # uploads/（入力ファイル）: 一時的な性質のため短めに自動削除
   lifecycle_rule {
     condition {

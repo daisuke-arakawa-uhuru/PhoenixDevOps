@@ -194,6 +194,15 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
   * UIは返却された各 `url`（署名付きURL）に対してブラウザから `fetch` を実行し、Markdownの生テキストデータを取得する。
   * 取得した生テキストを画面上のMarkdownプレビュー領域に渡し、HTMLとしてレンダリングする。
   * ダウンロード時は、この `url` を `<a>` タグの `href` に設定し、`download` 属性を指定してダウンロードさせる。
+  * 成果物保存先のCloud Storageバケットは、署名付きURLのMarkdownプレビュー用に `GET` / `HEAD` のCORSを許可する。
+
+### 4.4. デプロイ環境の設定
+
+* Web UIはTerraform管理のCloud Functions Gen2としてホスティングする。
+* デプロイ環境のAPI URLは、Viteのbuild-time `.env` ではなく、TerraformがWeb UI関数の環境変数として渡す。
+* Web UI関数は `/config.js` を動的生成し、`window.__PHOENIX_CONFIG__.API_URL` としてHTTP APIのURLを公開する。UIはこれを優先して参照する。
+* Cloud Functions のトリガー URL（`https://<region>-<project>.cloudfunctions.net/<function-name>`）から開いた場合も、Web UI関数は root-relative な静的 asset と `config.js` の参照先を関数配下へ補正する。
+* GCS bucket の Public Access Prevention が enforced の環境でも公開できるよう、静的ファイルの公開は GCS bucket IAM ではなく Cloud Functions / Cloud Run invoker IAM で制御する。
 
 ---
 

@@ -242,3 +242,75 @@ variable "gemini_api_key_secret_version" {
   type        = string
   default     = "latest"
 }
+
+variable "ui_bucket_name" {
+  description = "Web UI Cloud Functions source archive 用 GCS バケット名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "ui_function_name" {
+  description = "Web UI Cloud Functions 名。未指定時は環境名から生成する。"
+  type        = string
+  default     = null
+}
+
+variable "ui_force_destroy" {
+  description = "true の場合、中身があっても UI source archive bucket を削除可能にする。本番相当では false 固定。"
+  type        = bool
+  default     = false
+}
+
+variable "ui_allow_unauthenticated" {
+  description = "true の場合、Web UI を unauthenticated で呼び出せるようにする"
+  type        = bool
+  default     = true
+}
+
+variable "ui_use_mock" {
+  description = "配信環境の Web UI をモックモードで動作させるか"
+  type        = bool
+  default     = false
+}
+
+variable "ui_runtime" {
+  description = "Web UI Cloud Functions runtime"
+  type        = string
+  default     = "nodejs24"
+}
+
+variable "ui_available_memory" {
+  description = "Web UI Cloud Functions に割り当てるメモリ"
+  type        = string
+  default     = "256Mi"
+}
+
+variable "ui_available_cpu" {
+  description = "Web UI Cloud Functions に割り当てる CPU。concurrency > 1 の場合は 1 以上が必要。"
+  type        = string
+  default     = "1"
+}
+
+variable "ui_timeout_seconds" {
+  description = "Web UI Cloud Functions のタイムアウト秒数"
+  type        = number
+  default     = 60
+}
+
+variable "ui_min_instance_count" {
+  description = "Web UI Cloud Functions の最小インスタンス数"
+  type        = number
+  default     = 0
+}
+
+variable "ui_max_instance_count" {
+  description = "Web UI Cloud Functions の最大インスタンス数"
+  type        = number
+  default     = 3
+}
+
+variable "ui_max_instance_request_concurrency" {
+  description = "Web UI 1 インスタンスあたりの最大同時リクエスト数"
+  type        = number
+  default     = 80
+}
