@@ -33,7 +33,7 @@ test("normalizeGeminiError summarizes zero-quota RESOURCE_EXHAUSTED errors", () 
       error: {
         code: 429,
         message:
-          "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash",
+          "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-lite",
         status: "RESOURCE_EXHAUSTED",
         details: [
           {
@@ -53,7 +53,7 @@ test("normalizeGeminiError summarizes zero-quota RESOURCE_EXHAUSTED errors", () 
     }),
   );
 
-  const normalized = normalizeGeminiError(error, "gemini-2.0-flash");
+  const normalized = normalizeGeminiError(error, "gemini-3.1-flash-lite");
 
   assert.ok(normalized instanceof GeminiApiError);
   assert.strictEqual(normalized.statusCode, 429);
@@ -81,7 +81,7 @@ test("normalizeGeminiError marks retryable quota errors without zero-limit hint"
     }),
   );
 
-  const normalized = normalizeGeminiError(error, "gemini-2.0-flash");
+  const normalized = normalizeGeminiError(error, "gemini-3.1-flash-lite");
 
   assert.strictEqual(normalized.retryable, true);
   assert.strictEqual(normalized.retryDelayMs, 5000);

@@ -7,7 +7,7 @@ export class GeminiSettings {
 
   constructor({
     apiKey = null,
-    model = "gemini-2.0-flash",
+    model = "gemini-3.1-flash-lite",
     dryRun = false,
   }: {
     apiKey?: string | null;

@@ -34,7 +34,7 @@ analysis_worker_max_instance_count                = 3
 analysis_worker_max_instance_request_concurrency = 1
 analysis_worker_ingress_settings                  = "ALLOW_ALL"
 analysis_worker_results_prefix_template           = "results/{job_id}"
-analysis_worker_gemini_model                      = "gemini-2.0-flash"
+analysis_worker_gemini_model                      = "gemini-3.1-flash-lite"
 analysis_worker_gemini_dry_run                    = false
 
 # HTTP API Cloud Functions

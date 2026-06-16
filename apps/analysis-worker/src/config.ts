@@ -11,7 +11,7 @@ export class WorkerConfig {
     resultsBucket = null,
     resultsPrefixTemplate = "results/{job_id}",
     geminiApiKey = null,
-    geminiModel = "gemini-2.0-flash",
+    geminiModel = "gemini-3.1-flash-lite",
     geminiDryRun = false,
   }: {
     firestoreJobsCollection?: string;
@@ -35,7 +35,7 @@ export class WorkerConfig {
       resultsBucket: env.RESULTS_BUCKET || null,
       resultsPrefixTemplate: env.RESULTS_PREFIX_TEMPLATE || "results/{job_id}",
       geminiApiKey: env.GEMINI_API_KEY || null,
-      geminiModel: env.GEMINI_MODEL || "gemini-2.0-flash",
+      geminiModel: env.GEMINI_MODEL || "gemini-3.1-flash-lite",
       geminiDryRun: ["1", "true", "yes"].includes(String(env.GEMINI_DRY_RUN || "").toLowerCase()),
     });
   }
