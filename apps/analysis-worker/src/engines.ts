@@ -11,6 +11,7 @@ import {
 
 export interface ExtractionResult extends SpecificationResult {
   extractedItems: Record<string, unknown>;
+  debugArtifacts?: Record<string, string>;
 }
 
 export interface AnalysisEngine {
@@ -43,6 +44,7 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
     const [overviewMarkdown, overviewItems] = buildSourceCodeOverview(inputs);
     const prompt = buildSourceAnalysisPrompt(payload, inputs, overviewMarkdown);
     const response = await this.geminiClient.generate(prompt);
+    const sourceCodeMapMarkdown = buildSourceCodeMapDocument(inputs);
     return {
       summary: joinSections(overviewMarkdown, `## Gemini抽出結果\n\n${response}`),
       extractedItems: {
@@ -50,6 +52,9 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
         source_archive_uri: inputs.sourceArchiveUri,
         source_file_count: inputs.sourceFiles.length,
         static_overview: overviewItems,
+      },
+      debugArtifacts: {
+        "source-code-map.md": sourceCodeMapMarkdown,
       },
     };
   }
@@ -202,6 +207,9 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
   const readmeFiles = filePaths.filter((filePath) =>
     path.basename(filePath).toLowerCase().startsWith("readme"),
   );
+  const directoryTree = buildDirectoryTree(filePaths);
+  const moduleDependencyGraph = buildModuleDependencyGraph(inputs.sourceFiles);
+  const iacStructureMap = buildIaCStructureMap(inputs.sourceFiles);
 
   const items = {
     file_structure: filePaths,
@@ -215,9 +223,9 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
   const lines = [
     "## 静的構造解析結果",
     "",
-    "### ファイル構成",
+    "### ディレクトリ構造",
     "",
-    ...formatBullets(filePaths, "読み込み可能なソースファイルはありません。"),
+    directoryTree || "ソースファイルはありません。",
     "",
     "### 設定ファイル",
     "",
@@ -238,8 +246,296 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
     "### DB定義/データモデル候補",
     "",
     ...formatDatabaseTable(databaseDefinitions),
+    "",
+    "### モジュール間依存グラフ",
+    "",
+    moduleDependencyGraph,
+    "",
+    "### IaC構成要素",
+    "",
+    iacStructureMap,
   ];
   return [lines.join("\n"), items];
+}
+
+/**
+ * ソースコードマップドキュメント（GCS保存用デバッグ成果物）を生成する。
+ * ディレクトリツリー、モジュール依存グラフ、IaC構成要素を1ファイルにまとめる。
+ */
+export function buildSourceCodeMapDocument(inputs: AnalysisInput): string {
+  const filePaths = inputs.sourceFiles.map((file) => file.path);
+  const directoryTree = buildDirectoryTree(filePaths);
+  const moduleDependencyGraph = buildModuleDependencyGraph(inputs.sourceFiles);
+  const iacStructureMap = buildIaCStructureMap(inputs.sourceFiles);
+
+  return [
+    "# ソースコードマップ（静的解析結果）",
+    "",
+    "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
+    "> Gemini による解析結果ではなく、正規表現ベースの構造抽出結果を示します。",
+    "",
+    "---",
+    "",
+    "## 1. ディレクトリ構造",
+    "",
+    directoryTree || "ソースファイルはありません。",
+    "",
+    "---",
+    "",
+    "## 2. モジュール間依存グラフ",
+    "",
+    moduleDependencyGraph,
+    "",
+    "---",
+    "",
+    "## 3. IaC構成要素",
+    "",
+    iacStructureMap,
+  ].join("\n");
+}
+
+/**
+ * ファイルパス一覧からASCIIディレクトリツリーを生成する。
+ *
+ * @example
+ * buildDirectoryTree(["src/index.ts", "src/engines.ts", "README.md"])
+ * // => "README.md\nsrc/\n├── engines.ts\n└── index.ts"
+ */
+export function buildDirectoryTree(filePaths: string[]): string {
+  if (filePaths.length === 0) {
+    return "";
+  }
+
+  // パスをUnix区切りに正規化
+  const normalized = filePaths.map((p) => p.replaceAll("\\", "/"));
+
+  // ツリー構造をネストしたMapで構築: Map<name, subtree>
+  type Tree = Map<string, Tree>;
+  const root: Tree = new Map();
+
+  for (const filePath of normalized) {
+    const parts = filePath.split("/");
+    let node = root;
+    for (const part of parts) {
+      if (!node.has(part)) {
+        node.set(part, new Map());
+      }
+      node = node.get(part)!;
+    }
+  }
+
+  function renderTree(node: Tree, prefix: string): string[] {
+    const entries = [...node.entries()].sort(([a, aNode], [b, bNode]) => {
+      // ディレクトリを先にソート
+      const aIsDir = aNode.size > 0;
+      const bIsDir = bNode.size > 0;
+      if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+      return a.localeCompare(b);
+    });
+    const lines: string[] = [];
+    entries.forEach(([name, subtree], index) => {
+      const isLast = index === entries.length - 1;
+      const connector = isLast ? "└── " : "├── ";
+      const childPrefix = isLast ? prefix + "    " : prefix + "│   ";
+      if (subtree.size > 0) {
+        lines.push(`${prefix}${connector}${name}/`);
+        lines.push(...renderTree(subtree, childPrefix));
+      } else {
+        lines.push(`${prefix}${connector}${name}`);
+      }
+    });
+    return lines;
+  }
+
+  return renderTree(root, "").join("\n");
+}
+
+const MAX_DEPENDENCY_EDGES = 50;
+
+/**
+ * ソースファイルのimport文を静的解析し、Mermaid形式のモジュール依存グラフを生成する。
+ * 相対パスimportのみを対象とし、外部パッケージは除外する。
+ * 最大MAX_DEPENDENCY_EDGES件のエッジに制限する。
+ */
+export function buildModuleDependencyGraph(
+  files: Array<{ path: string; content: string }>,
+): string {
+  const edges: Array<{ from: string; to: string }> = [];
+
+  for (const file of files) {
+    if (edges.length >= MAX_DEPENDENCY_EDGES) break;
+    if (isTestFile(file.path)) continue;
+
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    const isJsTs = ["js", "jsx", "ts", "tsx", "mjs", "cjs"].includes(ext);
+    const isPython = ext === "py";
+
+    const importPaths: string[] = [];
+
+    if (isJsTs) {
+      // ES module: import ... from './foo'
+      for (const match of file.content.matchAll(
+        /^import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      // dynamic import: import('./foo') / require('./foo')
+      for (const match of file.content.matchAll(
+        /(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      // CommonJS: const x = require('./foo')
+      for (const match of file.content.matchAll(
+        /require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+    }
+
+    if (isPython) {
+      // from .foo import bar
+      for (const match of file.content.matchAll(
+        /^from\s+(\.+[\w./]*)\s+import/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      // import .foo  (relative import)
+      for (const match of file.content.matchAll(/^import\s+(\.+[\w.]+)/gm)) {
+        importPaths.push(match[1]);
+      }
+    }
+
+    for (const importPath of importPaths) {
+      // 相対パスのみ対象
+      if (!importPath.startsWith(".")) continue;
+
+      const fromDir = file.path.includes("/")
+        ? file.path.slice(0, file.path.lastIndexOf("/"))
+        : "";
+      const resolvedRaw = fromDir ? `${fromDir}/${importPath}` : importPath;
+      // 簡易パス正規化（../を解決）
+      const resolved = resolveRelativePath(resolvedRaw);
+
+      const fromLabel = sanitizeMermaidLabel(file.path);
+      const toLabel = sanitizeMermaidLabel(resolved);
+      if (fromLabel && toLabel && fromLabel !== toLabel) {
+        edges.push({ from: fromLabel, to: toLabel });
+      }
+      if (edges.length >= MAX_DEPENDENCY_EDGES) break;
+    }
+  }
+
+  if (edges.length === 0) {
+    return "モジュール間の相対import依存は検出されませんでした。";
+  }
+
+  const truncated = edges.length >= MAX_DEPENDENCY_EDGES;
+  const lines = [
+    "```mermaid",
+    "graph TD",
+    ...edges.map((e) => `  ${JSON.stringify(e.from)} --> ${JSON.stringify(e.to)}`),
+    "```",
+  ];
+  if (truncated) {
+    lines.push("");
+    lines.push(`> ※ エッジ数が上限（${MAX_DEPENDENCY_EDGES}件）に達したため、一部を省略しています。`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Terraformファイルを静的解析し、IaC構成要素をMarkdownテーブルで返す。
+ */
+export function buildIaCStructureMap(
+  files: Array<{ path: string; content: string }>,
+): string {
+  interface IaCItem {
+    kind: string;
+    name: string;
+    path: string;
+  }
+  const items: IaCItem[] = [];
+
+  for (const file of files) {
+    if (!file.path.endsWith(".tf")) continue;
+
+    for (const line of file.content.split(/\r?\n/)) {
+      const stripped = line.trim();
+
+      // provider "aws" { / provider "google" {
+      const providerMatch = stripped.match(/^provider\s+"([^"]+)"/);
+      if (providerMatch) {
+        items.push({ kind: "provider", name: providerMatch[1], path: file.path });
+        continue;
+      }
+
+      // resource "google_cloud_run_service" "api" {
+      const resourceMatch = stripped.match(/^resource\s+"([^"]+)"\s+"([^"]+)"/);
+      if (resourceMatch) {
+        items.push({
+          kind: "resource",
+          name: `${resourceMatch[1]}.${resourceMatch[2]}`,
+          path: file.path,
+        });
+        continue;
+      }
+
+      // module "vpc" {
+      const moduleMatch = stripped.match(/^module\s+"([^"]+)"/);
+      if (moduleMatch) {
+        items.push({ kind: "module", name: moduleMatch[1], path: file.path });
+        continue;
+      }
+
+      // variable "project_id" {
+      const variableMatch = stripped.match(/^variable\s+"([^"]+)"/);
+      if (variableMatch) {
+        items.push({ kind: "variable", name: variableMatch[1], path: file.path });
+        continue;
+      }
+
+      // output "api_url" {
+      const outputMatch = stripped.match(/^output\s+"([^"]+)"/);
+      if (outputMatch) {
+        items.push({ kind: "output", name: outputMatch[1], path: file.path });
+        continue;
+      }
+    }
+  }
+
+  if (items.length === 0) {
+    return "Terraformファイル（.tf）は検出されませんでした。";
+  }
+
+  return [
+    "| 種別 | 名前 | ファイル |",
+    "| --- | --- | --- |",
+    ...items.map((item) => `| ${item.kind} | ${item.name} | ${item.path} |`),
+  ].join("\n");
+}
+
+/**
+ * 相対パスを簡易正規化する（../を解決）。
+ */
+function resolveRelativePath(rawPath: string): string {
+  const parts = rawPath.split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (part === "..") {
+      resolved.pop();
+    } else if (part !== ".") {
+      resolved.push(part);
+    }
+  }
+  return resolved.join("/");
+}
+
+/**
+ * Mermaidラベルで使用できる文字列に変換する（特殊文字をエスケープ）。
+ */
+function sanitizeMermaidLabel(value: string): string {
+  return value.trim();
 }
 
 export function buildDocumentOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {

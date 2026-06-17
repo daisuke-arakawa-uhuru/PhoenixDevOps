@@ -41,6 +41,7 @@ const TEXT_EXTENSIONS = new Set([
   ".sh",
   ".sql",
   ".swift",
+  ".tf",
   ".toml",
   ".ts",
   ".tsx",
