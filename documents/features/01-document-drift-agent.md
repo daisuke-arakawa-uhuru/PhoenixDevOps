@@ -84,7 +84,7 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | --- | --- |
 | 対象システム | Webアプリケーションのソースコード一式を主な対象とする |
 | 言語・フレームワーク | 限定しない。ただし言語固有の深い静的解析は保証しない |
-| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README |
+| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README、IaC（Terraform） |
 | 解析対象外 | `node_modules`、`.git`、`.venv`、`__pycache__`、`dist`、`build`、`coverage`、`.next`、画像・動画などのバイナリファイル |
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
@@ -289,13 +289,18 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | 観点 | 抽出内容 |
 | --- | --- |
 | ファイル構成 | 読み込み対象になったソースファイルパス一覧 |
+| ディレクトリ構造 | ファイルパス一覧から生成する ASCII ツリー表示 |
 | 設定ファイル | `.env`、`package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile`、YAML/TOML/properties/conf など |
 | README | ファイル名が `README` で始まるファイル |
 | 依存関係 | `package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile` から依存名とバージョン記述を抽出 |
 | ルーティング/API候補 | FastAPI風デコレーター、Flask、Express、Django、Spring Mapping、Next.js API Routes の候補 |
 | DB定義/データモデル候補 | SQL の `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`、Django model、Prisma model |
+| モジュール間依存グラフ | JS/TS/Python の相対パス `import` / `require` を解析し、Mermaid `graph TD` 形式で出力（最大50エッジ） |
+| IaC構成要素 | Terraform（`.tf`）ファイルの `provider` / `resource` / `module` / `variable` / `output` ブロックをMarkdownテーブルで出力 |
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
+
+事前解析の結果は、Gemini prompt への埋め込みに加え、デバッグ用中間成果物 `source-code-map.md` として Cloud Storage に保存する。
 
 ### 11.4. Gemini 生成フェーズ
 
@@ -314,10 +319,11 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 成果物は Markdown として保存する。
 
-| 成果物 | 保存名 |
-| --- | --- |
-| 真の設計書 | `true-design.md` |
-| ドキュメント差分レポート | `document-drift-report.md` |
+| 成果物 | 保存名 | 種別 |
+| --- | --- | --- |
+| 真の設計書 | `true-design.md` | Gemini 生成 |
+| ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
+| ソースコードマップ | `source-code-map.md` | 静的解析（デバッグ用中間成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
 
