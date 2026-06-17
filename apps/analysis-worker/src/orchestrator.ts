@@ -99,6 +99,7 @@ export class AnalysisOrchestrator {
       const artifacts = generatedArtifacts(
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
+        sourceSpecification.artifacts,
       );
       const artifactPaths = await this.artifactWriter.write(payload, artifacts.asFiles());
       await this.jobRepository.markSucceeded(payload.jobId, artifactPaths);

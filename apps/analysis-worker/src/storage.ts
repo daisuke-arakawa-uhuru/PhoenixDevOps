@@ -152,7 +152,7 @@ export class LocalFileInputLoader implements InputLoader {
 }
 
 export interface ArtifactWriter {
-  write(payload: AnalysisTaskPayload, markdownFiles: Record<string, string>): Promise<Record<string, string>>;
+  write(payload: AnalysisTaskPayload, artifactFiles: Record<string, string>): Promise<Record<string, string>>;
 }
 
 export class GcsArtifactWriter implements ArtifactWriter {
@@ -176,17 +176,17 @@ export class GcsArtifactWriter implements ArtifactWriter {
 
   async write(
     payload: AnalysisTaskPayload,
-    markdownFiles: Record<string, string>,
+    artifactFiles: Record<string, string>,
   ): Promise<Record<string, string>> {
     const bucketName = this.resultsBucket || payload.sourceArchive.bucket;
     const bucket = this.storageClient.bucket(bucketName);
     const prefix = this.resultPrefix(payload);
     const artifactPaths: Record<string, string> = {};
 
-    for (const [fileName, content] of Object.entries(markdownFiles)) {
+    for (const [fileName, content] of Object.entries(artifactFiles)) {
       const objectName = `${prefix}/${fileName}`;
       await bucket.file(objectName).save(content, {
-        contentType: "text/markdown; charset=utf-8",
+        contentType: contentTypeForArtifact(fileName),
       });
       artifactPaths[fileName] = `gs://${bucketName}/${objectName}`;
     }
@@ -206,12 +206,12 @@ export class InMemoryArtifactWriter implements ArtifactWriter {
 
   async write(
     payload: AnalysisTaskPayload,
-    markdownFiles: Record<string, string>,
+    artifactFiles: Record<string, string>,
   ): Promise<Record<string, string>> {
-    this.filesByJobId[payload.jobId] = { ...markdownFiles };
+    this.filesByJobId[payload.jobId] = { ...artifactFiles };
     const prefix = (payload.resultsPrefix || `results/${payload.jobId}`).replace(/^\/+|\/+$/g, "");
     return Object.fromEntries(
-      Object.keys(markdownFiles).map((fileName) => [fileName, `memory://${prefix}/${fileName}`]),
+      Object.keys(artifactFiles).map((fileName) => [fileName, `memory://${prefix}/${fileName}`]),
     );
   }
 }
@@ -221,13 +221,13 @@ export class LocalArtifactWriter implements ArtifactWriter {
 
   async write(
     payload: AnalysisTaskPayload,
-    markdownFiles: Record<string, string>,
+    artifactFiles: Record<string, string>,
   ): Promise<Record<string, string>> {
     const jobOutputDir = path.join(this.outputDir, payload.jobId);
     fs.mkdirSync(jobOutputDir, { recursive: true });
     const artifactPaths: Record<string, string> = {};
 
-    for (const [fileName, content] of Object.entries(markdownFiles)) {
+    for (const [fileName, content] of Object.entries(artifactFiles)) {
       const filePath = path.join(jobOutputDir, fileName);
       fs.writeFileSync(filePath, content, "utf8");
       artifactPaths[fileName] = filePath;
@@ -235,6 +235,17 @@ export class LocalArtifactWriter implements ArtifactWriter {
 
     return artifactPaths;
   }
+}
+
+function contentTypeForArtifact(fileName: string): string {
+  const suffix = path.extname(fileName).toLowerCase();
+  if (suffix === ".json") {
+    return "application/json; charset=utf-8";
+  }
+  if (suffix === ".md") {
+    return "text/markdown; charset=utf-8";
+  }
+  return "text/plain; charset=utf-8";
 }
 
 function readSourceFiles(sourcePath: string, maxCharsPerFile: number): Array<{ path: string; content: string }> {

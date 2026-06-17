@@ -89,6 +89,7 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
 現行ワーカーは、入力本文の Gemini prompt への詰め込み過ぎを避けるため、ソースコード・ドキュメントともに最大80ファイル、1ファイルあたり最大12,000文字を上限に読み込む。上限を超える内容は切り詰めた上で解析対象に含める。
+また、LLMに渡す前処理として、Cloud Functions 上で外部 CLI に依存しない軽量な静的構造マップを生成する。構造マップには、ディレクトリツリー、ファイルメタデータ、依存マニフェスト、JS/TS・Python・Go の import 依存候補、Terraform の provider/module/resource/data/variable/output 構造を含める。
 
 ## 6. 出力仕様
 
@@ -134,6 +135,17 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | 2. 差分一覧 | ID、分類、対象、内容、重要度、確度、根拠コード、根拠ドキュメント、推奨対応 |
 | 3. 分類定義 | 差分分類の説明 |
 | 4. 判断ルール | ソースコードを正とすること、推測を断定しないこと、根拠を明示すること |
+
+### 6.3. 解析補助成果物
+
+STEP 1 の静的解析結果として、後続の専門エージェントがコード探索で迷子にならないための補助成果物を生成する。これらは画面表示を前提にせず、バックエンド成果物として保存する。
+
+| 成果物ファイル名 | 内容 |
+| --- | --- |
+| `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補のMarkdownダンプ |
+| `module-dependencies.mmd` | モジュール間依存候補のMermaidグラフ |
+| `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
+| `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
 
 ## 7. 判断ルール
 
