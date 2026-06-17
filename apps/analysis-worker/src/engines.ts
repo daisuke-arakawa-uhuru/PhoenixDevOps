@@ -445,7 +445,7 @@ export function buildModuleDependencyGraph(
 }
 
 /**
- * Terraformファイルを静的解析し、IaC構成要素をMarkdownテーブルで返す。
+ * 各種IaCファイル（Terraform, AWS CDK, CloudFormation, Kubernetes等）を静的解析し、構成要素をMarkdownテーブルで返す。
  */
 export function buildIaCStructureMap(
   files: Array<{ path: string; content: string }>,
@@ -458,60 +458,193 @@ export function buildIaCStructureMap(
   const items: IaCItem[] = [];
 
   for (const file of files) {
-    if (!file.path.endsWith(".tf")) continue;
+    if (isTestFile(file.path)) continue;
 
-    for (const line of file.content.split(/\r?\n/)) {
-      const stripped = line.trim();
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
 
-      // provider "aws" { / provider "google" {
-      const providerMatch = stripped.match(/^provider\s+"([^"]+)"/);
-      if (providerMatch) {
-        items.push({ kind: "provider", name: providerMatch[1], path: file.path });
-        continue;
+    // 1. Terraform (.tf)
+    if (ext === "tf") {
+      for (const line of file.content.split(/\r?\n/)) {
+        const stripped = line.trim();
+
+        // provider "aws" { / provider "google" {
+        const providerMatch = stripped.match(/^provider\s+"([^"]+)"/);
+        if (providerMatch) {
+          items.push({ kind: "provider", name: providerMatch[1], path: file.path });
+          continue;
+        }
+
+        // resource "google_cloud_run_service" "api" {
+        const resourceMatch = stripped.match(/^resource\s+"([^"]+)"\s+"([^"]+)"/);
+        if (resourceMatch) {
+          items.push({
+            kind: "resource",
+            name: `${resourceMatch[1]}.${resourceMatch[2]}`,
+            path: file.path,
+          });
+          continue;
+        }
+
+        // module "vpc" {
+        const moduleMatch = stripped.match(/^module\s+"([^"]+)"/);
+        if (moduleMatch) {
+          items.push({ kind: "module", name: moduleMatch[1], path: file.path });
+          continue;
+        }
+
+        // variable "project_id" {
+        const variableMatch = stripped.match(/^variable\s+"([^"]+)"/);
+        if (variableMatch) {
+          items.push({ kind: "variable", name: variableMatch[1], path: file.path });
+          continue;
+        }
+
+        // output "api_url" {
+        const outputMatch = stripped.match(/^output\s+"([^"]+)"/);
+        if (outputMatch) {
+          items.push({ kind: "output", name: outputMatch[1], path: file.path });
+          continue;
+        }
+      }
+      continue;
+    }
+
+    // 2. AWS CDK (TypeScript / JavaScript)
+    if (ext === "ts" || ext === "js" || ext === "tsx" || ext === "jsx") {
+      const normalizedPath = file.path.replaceAll("\\", "/");
+      const isCdkPath = normalizedPath.includes("/cdk/") || normalizedPath.includes("cdk/");
+      const hasCdkImport = file.content.includes("aws-cdk-lib") || file.content.includes("@aws-cdk") || file.content.includes("constructs");
+      
+      if (isCdkPath || hasCdkImport) {
+        // Stack / Construct / Resource クラス定義の検出
+        const classMatches = file.content.matchAll(/class\s+([a-zA-Z0-9_$]+)\s+extends\s+(?:[a-zA-Z0-9_$]+\.)?(Stack|Construct|Resource)\b/g);
+        for (const match of classMatches) {
+          const className = match[1];
+          const baseName = match[2];
+          items.push({
+            kind: `CDK ${baseName}`,
+            name: className,
+            path: file.path
+          });
+        }
+
+        // CDK リソース構築 (new ...) の検出
+        const newMatches = file.content.matchAll(/new\s+([a-zA-Z0-9_$]+\.[a-zA-Z0-9_$]+|[A-Z][a-zA-Z0-9_$]+)\s*\(/g);
+        const excludeClassNames = new Set([
+          "App", "Stack", "Construct", "Error", "Date", "Map", "Set", "Promise", "RegExp", "Object", "Array",
+          "String", "Number", "Boolean", "CanonicalUserPrincipal", "ArnPrincipal", "ServicePrincipal",
+          "AccountRootPrincipal", "AnyPrincipal", "PolicyStatement", "StackProps", "AppProps"
+        ]);
+        
+        for (const match of newMatches) {
+          const className = match[1];
+          const shortName = className.includes(".") ? className.split(".").pop()! : className;
+          if (excludeClassNames.has(className) || excludeClassNames.has(shortName)) {
+            continue;
+          }
+          items.push({
+            kind: "CDK Resource",
+            name: className,
+            path: file.path
+          });
+        }
+      }
+      continue;
+    }
+
+    // 3. CloudFormation / SAM / Kubernetes (.yaml, .yml, .json)
+    if (ext === "yaml" || ext === "yml" || ext === "json") {
+      // 3.1 CloudFormation
+      if (file.content.includes("AWSTemplateFormatVersion")) {
+        if (ext === "yaml" || ext === "yml") {
+          const lines = file.content.split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const typeMatch = line.match(/^(\s*)Type:\s*['"]?(AWS::[a-zA-Z0-9::]+)['"]?/);
+            if (typeMatch) {
+              const typeIndent = typeMatch[1].length;
+              const resType = typeMatch[2];
+              let resName = "Unknown";
+              for (let j = i - 1; j >= 0; j--) {
+                const prevLine = lines[j];
+                const nameMatch = prevLine.match(/^(\s*)([a-zA-Z0-9_-]+):\s*$/);
+                if (nameMatch) {
+                  const nameIndent = nameMatch[1].length;
+                  if (nameIndent < typeIndent) {
+                    resName = nameMatch[2];
+                    break;
+                  }
+                }
+              }
+              items.push({
+                kind: "CloudFormation Resource",
+                name: `${resName} (${resType})`,
+                path: file.path
+              });
+            }
+          }
+        } else {
+          // JSON
+          const matches = file.content.matchAll(/"Type"\s*:\s*"([^"]+)"/g);
+          for (const match of matches) {
+            const resType = match[1];
+            if (resType.startsWith("AWS::")) {
+              items.push({
+                kind: "CloudFormation Resource",
+                name: resType,
+                path: file.path
+              });
+            }
+          }
+        }
       }
 
-      // resource "google_cloud_run_service" "api" {
-      const resourceMatch = stripped.match(/^resource\s+"([^"]+)"\s+"([^"]+)"/);
-      if (resourceMatch) {
-        items.push({
-          kind: "resource",
-          name: `${resourceMatch[1]}.${resourceMatch[2]}`,
-          path: file.path,
-        });
-        continue;
+      // 3.2 Kubernetes
+      if ((ext === "yaml" || ext === "yml") && file.content.includes("apiVersion:") && file.content.includes("kind:")) {
+        let kind = "";
+        let name = "";
+        const lines = file.content.split(/\r?\n/);
+        for (const line of lines) {
+          const kindMatch = line.match(/^\s*kind:\s*([a-zA-Z0-9_-]+)/);
+          if (kindMatch) {
+            kind = kindMatch[1];
+          }
+          const nameMatch = line.match(/^\s*name:\s*([a-zA-Z0-9_-]+)/);
+          if (nameMatch && !name) {
+            name = nameMatch[1];
+          }
+        }
+        if (kind && name) {
+          items.push({
+            kind: `Kubernetes ${kind}`,
+            name: name,
+            path: file.path
+          });
+        }
       }
-
-      // module "vpc" {
-      const moduleMatch = stripped.match(/^module\s+"([^"]+)"/);
-      if (moduleMatch) {
-        items.push({ kind: "module", name: moduleMatch[1], path: file.path });
-        continue;
-      }
-
-      // variable "project_id" {
-      const variableMatch = stripped.match(/^variable\s+"([^"]+)"/);
-      if (variableMatch) {
-        items.push({ kind: "variable", name: variableMatch[1], path: file.path });
-        continue;
-      }
-
-      // output "api_url" {
-      const outputMatch = stripped.match(/^output\s+"([^"]+)"/);
-      if (outputMatch) {
-        items.push({ kind: "output", name: outputMatch[1], path: file.path });
-        continue;
-      }
+      continue;
     }
   }
 
-  if (items.length === 0) {
-    return "Terraformファイル（.tf）は検出されませんでした。";
+  // 重複排除
+  const uniqueItems: IaCItem[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const key = `${item.kind}|${item.name}|${item.path}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueItems.push(item);
+    }
+  }
+
+  if (uniqueItems.length === 0) {
+    return "IaC構成要素は検出されませんでした。";
   }
 
   return [
     "| 種別 | 名前 | ファイル |",
     "| --- | --- | --- |",
-    ...items.map((item) => `| ${item.kind} | ${item.name} | ${item.path} |`),
+    ...uniqueItems.map((item) => `| ${item.kind} | ${item.name} | ${item.path} |`),
   ].join("\n");
 }
 

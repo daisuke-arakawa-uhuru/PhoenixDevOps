@@ -235,4 +235,60 @@ describe("buildIaCStructureMap", () => {
     assert.ok(result.includes("| 種別 |"), `expected table header in:\n${result}`);
     assert.ok(result.includes("| --- |"), `expected table separator in:\n${result}`);
   });
+
+  it("AWS CDK (TypeScript) を検出する", () => {
+    const files = [
+      {
+        path: "cdk/lib/my-stack.ts",
+        content: `
+          import { Stack } from 'aws-cdk-lib';
+          import * as s3 from 'aws-cdk-lib/aws-s3';
+          export class MyStack extends Stack {
+            constructor() {
+              new s3.Bucket(this, 'MyBucket');
+            }
+          }
+        `,
+      },
+    ];
+    const result = buildIaCStructureMap(files);
+    assert.ok(result.includes("CDK Stack"), `expected CDK Stack in:\n${result}`);
+    assert.ok(result.includes("MyStack"), `expected MyStack in:\n${result}`);
+    assert.ok(result.includes("CDK Resource"), `expected CDK Resource in:\n${result}`);
+    assert.ok(result.includes("s3.Bucket"), `expected s3.Bucket in:\n${result}`);
+  });
+
+  it("CloudFormation を検出する", () => {
+    const files = [
+      {
+        path: "template.yaml",
+        content: `
+          AWSTemplateFormatVersion: '2010-09-09'
+          Resources:
+            MyBucket:
+              Type: AWS::S3::Bucket
+        `,
+      },
+    ];
+    const result = buildIaCStructureMap(files);
+    assert.ok(result.includes("CloudFormation Resource"), `expected CF Resource in:\n${result}`);
+    assert.ok(result.includes("MyBucket (AWS::S3::Bucket)"), `expected Bucket info in:\n${result}`);
+  });
+
+  it("Kubernetes を検出する", () => {
+    const files = [
+      {
+        path: "pod.yaml",
+        content: `
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: my-pod
+        `,
+      },
+    ];
+    const result = buildIaCStructureMap(files);
+    assert.ok(result.includes("Kubernetes Pod"), `expected Kubernetes Pod in:\n${result}`);
+    assert.ok(result.includes("my-pod"), `expected my-pod in:\n${result}`);
+  });
 });

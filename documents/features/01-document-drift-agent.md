@@ -84,7 +84,7 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | --- | --- |
 | 対象システム | Webアプリケーションのソースコード一式を主な対象とする |
 | 言語・フレームワーク | 限定しない。ただし言語固有の深い静的解析は保証しない |
-| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README、IaC（Terraform） |
+| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README、IaC（Terraform, AWS CDK等） |
 | 解析対象外 | `node_modules`、`.git`、`.venv`、`__pycache__`、`dist`、`build`、`coverage`、`.next`、画像・動画などのバイナリファイル |
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
@@ -296,7 +296,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ルーティング/API候補 | FastAPI風デコレーター、Flask、Express、Django、Spring Mapping、Next.js API Routes の候補 |
 | DB定義/データモデル候補 | SQL の `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`、Django model、Prisma model |
 | モジュール間依存グラフ | JS/TS/Python の相対パス `import` / `require` を解析し、Mermaid `graph TD` 形式で出力（最大50エッジ） |
-| IaC構成要素 | Terraform（`.tf`）ファイルの `provider` / `resource` / `module` / `variable` / `output` ブロックをMarkdownテーブルで出力 |
+| IaC構成要素 | 各種IaC（Terraform, AWS CDK, CloudFormation, Kubernetes等）ファイルを静的解析し、構成要素（Resource/Stack等）をMarkdownテーブルで出力 |
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
 
