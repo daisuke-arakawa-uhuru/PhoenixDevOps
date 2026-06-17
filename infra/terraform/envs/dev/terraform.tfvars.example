@@ -34,7 +34,7 @@ analysis_worker_max_instance_count                = 3
 analysis_worker_max_instance_request_concurrency = 1
 analysis_worker_ingress_settings                  = "ALLOW_ALL"
 analysis_worker_results_prefix_template           = "results/{job_id}"
-analysis_worker_gemini_model                      = "gemini-2.0-flash"
+analysis_worker_gemini_model                      = "gemini-3.1-flash-lite"
 analysis_worker_gemini_dry_run                    = false
 
 # HTTP API Cloud Functions
@@ -69,7 +69,7 @@ ui_allow_unauthenticated             = true
 ui_use_mock                          = false
 
 # Gemini API key は実値を tfvars に書かない。Secret Manager の secret ID のみ指定する。
-# 未指定時は GEMINI_API_KEY を設定せず、アプリ側の dry-run client にフォールバックする。
+# 未指定時は GEMINI_API_KEY を設定せず、analysis_worker_gemini_dry_run=false ではワーカーが失敗する。
+# ローカル疎通確認などで Gemini API を呼び出さない場合のみ analysis_worker_gemini_dry_run=true にする。
 gemini_api_key_secret_id      = "gemini-api-key"
 gemini_api_key_secret_version = "latest"
-analysis_worker_gemini_dry_run = false # 実機で動かす場合は必ず false にする

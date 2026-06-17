@@ -103,8 +103,12 @@ gemini_api_key_secret_id      = "gemini-api-key"
 gemini_api_key_secret_version = "latest"
 ```
 
-未指定の場合、Cloud Functions には `GEMINI_API_KEY` が設定されず、解析ワーカー側の dry-run client に
-フォールバックします。
+GitHub Actions の plan/apply は、Repository / Environment Variables の `GEMINI_API_KEY_SECRET_ID` /
+`GEMINI_API_KEY_SECRET_VERSION` を Terraform 変数として渡します。未設定時は `gemini-api-key` / `latest` を使用します。
+
+未指定の場合、Cloud Functions には `GEMINI_API_KEY` が設定されず、`GEMINI_DRY_RUN=false` の解析ワーカーは
+起動時に Gemini API キー未設定として失敗します。ローカル疎通確認などで Gemini API を呼び出さない場合のみ
+`analysis_worker_gemini_dry_run = true` を明示してください。
 
 API 側が Cloud Tasks の HTTP target を作成する際は、Terraform output の
 `analysis_worker_function_uri` を URL に、`analysis_task_invoker_service_account_email` を OIDC token の

@@ -81,6 +81,9 @@ jobs:
         run: |
           terraform -chdir=${{ env.WORKING_DIR }} plan -no-color -input=false \
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="gemini_api_key_secret_id=${{ vars.GEMINI_API_KEY_SECRET_ID || 'gemini-api-key' }}" \
+            -var="gemini_api_key_secret_version=${{ vars.GEMINI_API_KEY_SECRET_VERSION || 'latest' }}" \
+            -var="analysis_worker_gemini_dry_run=false" \
             -out=tfplan
         continue-on-error: true
 

@@ -69,7 +69,7 @@ npm test
 
 ## ローカル実行
 
-依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。dry-run では `GEMINI_API_KEY` は不要です。
+依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。dry-run を明示した場合のみ `GEMINI_API_KEY` は不要です。
 
 ```bash
 cd apps/analysis-worker
@@ -89,12 +89,22 @@ node src/local-runner.js \
 
 | 変数名 | 必須 | 説明 |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | 任意 | Gemini API のキー。dry-run または未設定時は dry-run client を使用します。 |
-| `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-2.0-flash` |
-| `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で Gemini API を呼び出しません。 |
+| `GEMINI_API_KEY` | 条件付き | Gemini API のキー。`GEMINI_DRY_RUN` が未指定または `false` の場合は必須です。 |
+| `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-3.1-flash-lite` |
+| `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で明示的に dry-run client を使用し、Gemini API を呼び出しません。 |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | ジョブ状態を保存する Firestore コレクション。デフォルト: `jobs` |
 | `RESULTS_BUCKET` | 任意 | 成果物保存先 bucket。未指定時は source archive と同じ bucket を使います。 |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | 成果物 prefix。デフォルト: `results/{job_id}` |
+
+## Gemini API quota エラー
+
+`429 RESOURCE_EXHAUSTED` が返り、本文に `free_tier` や `limit: 0` が含まれる場合、ワーカーは
+Gemini API へ到達していますが、API key が紐づく Google Cloud project / billing account に利用可能な
+Gemini API quota がありません。Google AI Studio の Billing / Rate limits で、対象 project が paid tier
+または利用可能な prepaid credit を持つ状態か確認してください。
+
+一時的な RPM / TPM 超過の場合のみ、ワーカーは `RetryInfo` の秒数または指数バックオフで最大 2 回 retry します。
+`limit: 0` の quota エラーは設定・課金側の問題として retry せず失敗させます。
 
 ## Cloud Functions デプロイ例
 
@@ -109,7 +119,8 @@ gcloud functions deploy analysis-worker \
   --source apps/analysis-worker \
   --entry-point runAnalysisWorker \
   --trigger-http \
-  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id}
+  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest
 ```
 
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。

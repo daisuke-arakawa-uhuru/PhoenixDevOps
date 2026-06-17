@@ -222,7 +222,7 @@ variable "analysis_worker_results_prefix_template" {
 variable "analysis_worker_gemini_model" {
   description = "解析ワーカーが使用する Gemini model"
   type        = string
-  default     = "gemini-2.0-flash"
+  default     = "gemini-3.1-flash-lite"
 }
 
 variable "analysis_worker_gemini_dry_run" {

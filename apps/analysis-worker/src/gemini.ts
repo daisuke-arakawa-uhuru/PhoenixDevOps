@@ -7,7 +7,7 @@ export class GeminiSettings {
 
   constructor({
     apiKey = null,
-    model = "gemini-2.0-flash",
+    model = "gemini-3.1-flash-lite",
     dryRun = false,
   }: {
     apiKey?: string | null;
@@ -27,6 +27,7 @@ export interface GeminiClient {
 export class GoogleGenAIClient implements GeminiClient {
   private client: GoogleGenAI;
   private model: string;
+  private maxRetries: number;
 
   constructor(settings: GeminiSettings) {
     if (!settings.apiKey) {
@@ -34,15 +35,81 @@ export class GoogleGenAIClient implements GeminiClient {
     }
     this.client = new GoogleGenAI({ apiKey: settings.apiKey });
     this.model = settings.model;
+    this.maxRetries = 2;
   }
 
   async generate(prompt: string): Promise<string> {
-    const result = await this.client.models.generateContent({
-      model: this.model,
-      contents: prompt,
-    });
-    return result.text || String(result);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const result = await this.client.models.generateContent({
+          model: this.model,
+          contents: prompt,
+        });
+        return result.text || String(result);
+      } catch (error) {
+        const normalized = normalizeGeminiError(error, this.model);
+        if (!normalized.retryable || attempt >= this.maxRetries) {
+          throw normalized;
+        }
+        await sleep(normalized.retryDelayMs || retryDelayMs(attempt));
+      }
+    }
   }
+}
+
+export class GeminiApiError extends Error {
+  statusCode: number | null;
+  apiStatus: string | null;
+  retryable: boolean;
+  retryDelayMs: number | null;
+
+  constructor({
+    message,
+    statusCode = null,
+    apiStatus = null,
+    retryable = false,
+    retryDelayMs = null,
+  }: {
+    message: string;
+    statusCode?: number | null;
+    apiStatus?: string | null;
+    retryable?: boolean;
+    retryDelayMs?: number | null;
+  }) {
+    super(message);
+    this.name = "GeminiApiError";
+    this.statusCode = statusCode;
+    this.apiStatus = apiStatus;
+    this.retryable = retryable;
+    this.retryDelayMs = retryDelayMs;
+  }
+}
+
+export function normalizeGeminiError(error: unknown, model: string): GeminiApiError {
+  const parsed = parseGeminiError(error);
+  const quotaExceeded = parsed.statusCode === 429 || parsed.apiStatus === "RESOURCE_EXHAUSTED";
+
+  if (quotaExceeded) {
+    const hasNoFreeTierQuota = /limit:\s*0/i.test(parsed.message);
+    const hint = hasNoFreeTierQuota
+      ? "The API key project currently has no usable free-tier quota. Set up Gemini API billing/paid tier in AI Studio, add prepaid credits if required, or switch to an API key from a project with quota."
+      : "Retry later, reduce request frequency, or reduce input size.";
+    const quotas = parsed.quotaIds.length > 0 ? ` Quotas: ${parsed.quotaIds.join(", ")}.` : "";
+    return new GeminiApiError({
+      message: `Gemini API quota exceeded for model ${model}. ${hint}${quotas}`,
+      statusCode: parsed.statusCode,
+      apiStatus: parsed.apiStatus,
+      retryable: !hasNoFreeTierQuota,
+      retryDelayMs: parsed.retryDelayMs,
+    });
+  }
+
+  return new GeminiApiError({
+    message: `Gemini API request failed for model ${model}: ${parsed.message}`,
+    statusCode: parsed.statusCode,
+    apiStatus: parsed.apiStatus,
+    retryable: false,
+  });
 }
 
 export class DryRunGeminiClient implements GeminiClient {
@@ -118,7 +185,7 @@ export class DryRunGeminiClient implements GeminiClient {
 }
 
 export function buildGeminiClient(settings: GeminiSettings): GeminiClient {
-  if (settings.dryRun || !settings.apiKey) {
+  if (settings.dryRun) {
     return new DryRunGeminiClient();
   }
   return new GoogleGenAIClient(settings);
@@ -139,4 +206,98 @@ function extractPromptSection(prompt: string, startMarker: string, endMarker: st
 
 function truncate(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n...[truncated]`;
+}
+
+function parseGeminiError(error: unknown): {
+  message: string;
+  statusCode: number | null;
+  apiStatus: string | null;
+  quotaIds: string[];
+  retryDelayMs: number | null;
+} {
+  const fallbackMessage = error instanceof Error ? error.message : String(error);
+  const statusCode = numberFromUnknown(getObjectValue(error, "code"));
+  const apiStatus = stringFromUnknown(getObjectValue(error, "status"));
+  const payload = parseErrorPayload(fallbackMessage);
+  const apiError = asRecord(payload?.error);
+  const details = Array.isArray(apiError?.details) ? apiError.details : [];
+
+  return {
+    message: stringFromUnknown(apiError?.message) || fallbackMessage,
+    statusCode: numberFromUnknown(apiError?.code) ?? statusCode,
+    apiStatus: stringFromUnknown(apiError?.status) || apiStatus,
+    quotaIds: extractQuotaIds(details),
+    retryDelayMs: extractRetryDelayMs(details),
+  };
+}
+
+function parseErrorPayload(message: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(message));
+  } catch {
+    return null;
+  }
+}
+
+function extractQuotaIds(details: unknown[]): string[] {
+  const quotaIds: string[] = [];
+  for (const detail of details) {
+    const record = asRecord(detail);
+    if (!record) {
+      continue;
+    }
+    if (!String(record?.["@type"] || "").endsWith("QuotaFailure")) {
+      continue;
+    }
+    const violations = Array.isArray(record.violations) ? record.violations : [];
+    for (const violation of violations) {
+      const quotaId = stringFromUnknown(asRecord(violation)?.quotaId);
+      if (quotaId) {
+        quotaIds.push(quotaId);
+      }
+    }
+  }
+  return [...new Set(quotaIds)];
+}
+
+function extractRetryDelayMs(details: unknown[]): number | null {
+  for (const detail of details) {
+    const record = asRecord(detail);
+    if (!record) {
+      continue;
+    }
+    if (!String(record?.["@type"] || "").endsWith("RetryInfo")) {
+      continue;
+    }
+    const retryDelay = stringFromUnknown(record.retryDelay);
+    const match = retryDelay?.match(/^(\d+(?:\.\d+)?)s$/);
+    if (match) {
+      return Math.ceil(Number(match[1]) * 1000);
+    }
+  }
+  return null;
+}
+
+function retryDelayMs(attempt: number): number {
+  return Math.min(1000 * 2 ** attempt, 8000);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function getObjectValue(value: unknown, key: string): unknown {
+  return asRecord(value)?.[key];
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }

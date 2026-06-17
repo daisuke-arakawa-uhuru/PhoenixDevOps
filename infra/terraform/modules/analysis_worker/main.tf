@@ -117,6 +117,13 @@ resource "google_cloudfunctions2_function" "worker" {
   location    = var.location
   description = "PhoenixDevOps document drift analysis worker"
 
+  lifecycle {
+    precondition {
+      condition     = var.gemini_dry_run || try(length(trimspace(var.gemini_api_key_secret_id)) > 0, false)
+      error_message = "gemini_api_key_secret_id is required when gemini_dry_run is false."
+    }
+  }
+
   build_config {
     runtime     = var.runtime
     entry_point = var.entry_point

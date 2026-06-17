@@ -31,6 +31,8 @@ MVPでは、次の6機能を作る。
 | F-05 | ドキュメント差分レポート生成 | 実装と既存ドキュメントの差分を4分類で整理し、Markdown形式で出力する |
 | F-06 | 解析ジョブ管理 | `queued / running / succeeded / failed` の状態を管理する |
 
+`apps/analysis-worker` の現行実装では、F-02〜F-05 は軽量な事前抽出結果を Gemini API の prompt に渡して Markdown を生成する。F-06 は Cloud Tasks から HTTP POST で起動される Cloud Functions ワーカーとして実装する。
+
 ### 2.2. MVPではやらないこと
 
 次の機能は、MVP対象外とする。
@@ -59,11 +61,22 @@ MVPでは、次の6機能を作る。
 
 | 入力 | 必須 | 内容 |
 | --- | --- | --- |
-| ソースコード群 | 必須 | Git管理されていない生のソースコード一式。MVPではZIPファイルでのアップロードを想定する |
-| 既存ドキュメント群 | 必須 | ソースコードと乖離している可能性がある古い仕様書・設計書。Excel、PDFを中心に、600個規模のファイルを想定する |
+| ソースコード群 | 必須 | Git管理されていない生のソースコード一式。MVPではZIPファイルでのアップロードを主想定とする。現行ワーカーはZIP内のテキストファイル、または単体のテキストファイルを読み込める |
+| 既存ドキュメント群 | 必須 | ソースコードと乖離している可能性がある古い仕様書・設計書。PDF、Excel、ZIP内テキスト、Markdown、プレーンテキストを読み込み対象とする |
 | プロジェクト名 | 任意 | 生成される真の設計書、ドキュメント差分レポートのタイトルに使用する |
 
 既存ドキュメント群が未登録の場合はドキュメント差分を評価できないため、MVPの通常フローでは必須入力として扱う。
+
+Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側との接続容易性のため `snake_case` と `camelCase` の両方を受け付ける。
+
+| 項目 | 必須 | 内容 |
+| --- | --- | --- |
+| `job_id` / `jobId` | 必須 | 解析ジョブID |
+| `source_archive` / `sourceArchive` / `source_archive_uri` / `sourceArchiveUri` | 必須 | ソースコード群の `gs://bucket/object` URI、または `{ bucket, object }` 形式の参照 |
+| `documents` / `document_uris` / `documentUris` | 必須 | 既存ドキュメント群の参照配列。空配列は不可 |
+| `project_name` / `projectName` | 任意 | 成果物タイトル用のプロジェクト名 |
+| `results_prefix` / `resultsPrefix` | 任意 | 成果物保存先 prefix。未指定時は `results/{job_id}` |
+| `requested_by` / `requestedBy` | 任意 | 依頼者識別子。現行ワーカーでは payload として保持するが処理分岐には使わない |
 
 ## 5. 解析対象
 
@@ -72,14 +85,18 @@ MVPでは、次の6機能を作る。
 | 対象システム | Webアプリケーションのソースコード一式を主な対象とする |
 | 言語・フレームワーク | 限定しない。ただし言語固有の深い静的解析は保証しない |
 | 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README |
-| 解析対象外 | `node_modules`、`.git`、ビルド成果物、画像・動画などのバイナリファイル |
+| 解析対象外 | `node_modules`、`.git`、`.venv`、`__pycache__`、`dist`、`build`、`coverage`、`.next`、画像・動画などのバイナリファイル |
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
+
+現行ワーカーは、入力本文の Gemini prompt への詰め込み過ぎを避けるため、ソースコード・ドキュメントともに最大80ファイル、1ファイルあたり最大12,000文字を上限に読み込む。上限を超える内容は切り詰めた上で解析対象に含める。
 
 ## 6. 出力仕様
 
 ### 6.1. 真の設計書
 
 ソースコードを正として、現在のシステムの実態を反映した設計書を生成する。
+
+成果物ファイル名は `true-design.md` とする。
 
 | 章 | 内容 |
 | --- | --- |
@@ -97,6 +114,8 @@ MVPでは、次の6機能を作る。
 ### 6.2. ドキュメント差分レポート
 
 ソースコード由来の仕様と既存ドキュメントを比較し、差分をレポート化する。
+
+成果物ファイル名は `document-drift-report.md` とする。
 
 #### 差分分類
 
@@ -134,6 +153,17 @@ MVPでは、次の6機能を作る。
 | failed | 解析または成果物生成に失敗した状態 |
 
 `failed` の場合は、失敗理由をユーザーに表示する。ユーザーは失敗したジョブを再実行できる。
+
+`apps/analysis-worker` は Firestore の `jobs` コレクションを既定の状態保存先とし、状態更新時に `status`、`updated_at`、`artifact_paths`、`error_message` を保存する。既に `succeeded` のジョブが再実行された場合は、再解析せず保存済みの `artifact_paths` を返し、レスポンスに `job_already_succeeded` を含める。
+
+Cloud Functions の HTTP レスポンスは次の方針とする。
+
+| 条件 | ステータス | レスポンス概要 |
+| --- | ---: | --- |
+| `POST` 以外 | 405 | `method_not_allowed` |
+| payload 不正 | 400 | `invalid_payload` と検証エラーメッセージ |
+| 解析成功 | 200 | `jobId`、`status`、`artifactPaths` |
+| 解析失敗 | 500 | `jobId`、`failed`、失敗メッセージ |
 
 ## 9. 処理構成
 
@@ -231,3 +261,75 @@ flowchart LR
 | Firestore | `queued / running / succeeded / failed` などのジョブ状態をAPIから読み書きしやすい。画面側から状態取得APIを呼ぶ構成と相性がよい。 | Cloud Storageに状態ファイルを置く方法も可能だが、状態更新や検索が増えると扱いづらい。 |
 | Cloud Storage | アップロードされたソースコード群、既存ドキュメント群、生成された真の設計書・ドキュメント差分レポートを保管する用途に合う。 | Firestoreにファイル本文を保存する方法もあるが、大量のExcel/PDFや生成成果物の保存先としてはCloud Storageの方が自然。 |
 | Gemini API | ハッカソン指定のGoogle AI技術群の中で、MVPの中心処理であるソースコード解析、既存ドキュメント抽出、仕様比較、Markdown成果物生成に最も直接使いやすい。 | Gemini Enterprise、Agent Builder、ADKなども選択肢だが、MVPではまず単一のAPIからAI処理を呼び出す方が構成をシンプルにできるため、Gemini APIを採用する。 |
+
+## 11. `apps/analysis-worker` の現行実装
+
+### 11.1. 実行方式
+
+解析ワーカーは Node.js 24 系の TypeScript 実装で、Cloud Functions の HTTP エントリポイント `runAnalysisWorker` として動作する。Cloud Tasks から `POST` で起動され、Cloud Storage から入力を読み込み、Firestore のジョブ状態を更新し、Gemini API で成果物を生成して Cloud Storage に保存する。
+
+ローカル確認用に `src/local-runner.ts` を持ち、`--source`、`--document`、`--project-name`、`--job-id`、`--output`、`--dry-run` を指定して同じオーケストレーターを実行できる。
+
+### 11.2. 入力読み込み
+
+| 入力種別 | 現行実装の扱い |
+| --- | --- |
+| ソースZIP | ZIP内のテキスト系ファイルを読み込む。除外ディレクトリと非テキスト拡張子は読み飛ばす |
+| ソース単体ファイル | テキスト系拡張子のみ読み込む |
+| PDF | `pdf-parse` で本文テキストを抽出する。抽出できない場合は抽出不可として扱う |
+| Excel | xlsx 内 XML から shared strings と worksheet の値を軽量抽出する |
+| ドキュメントZIP | ZIP内のテキスト系ファイルを読み込む |
+| Markdown / プレーンテキスト等 | UTF-8 テキストとして読み込む |
+| 未対応形式 | 未対応形式であることを示す本文を生成し、判断不能候補として扱う |
+
+### 11.3. ソースコード事前解析
+
+Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出する。
+
+| 観点 | 抽出内容 |
+| --- | --- |
+| ファイル構成 | 読み込み対象になったソースファイルパス一覧 |
+| 設定ファイル | `.env`、`package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile`、YAML/TOML/properties/conf など |
+| README | ファイル名が `README` で始まるファイル |
+| 依存関係 | `package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile` から依存名とバージョン記述を抽出 |
+| ルーティング/API候補 | FastAPI風デコレーター、Flask、Express、Django、Spring Mapping、Next.js API Routes の候補 |
+| DB定義/データモデル候補 | SQL の `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`、Django model、Prisma model |
+
+この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
+
+### 11.4. Gemini 生成フェーズ
+
+現行ワーカーは、同一の Gemini client を使って次の4段階の prompt を実行する。
+
+| フェーズ | TASK | 役割 |
+| --- | --- | --- |
+| ソースコード解析 | `SOURCE_ANALYSIS` | 事前解析結果とソース抜粋から実装仕様を抽出する |
+| ドキュメント抽出 | `DOCUMENT_EXTRACTION` | 既存ドキュメント本文から仕様記述と根拠ドキュメントを抽出する |
+| 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
+| 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
+
+既定モデルは `gemini-3.1-flash-lite` とする。`GEMINI_DRY_RUN` が有効な場合は Gemini API を呼び出さず、prompt 接続と成果物保存経路の確認用 Markdown を生成する。
+
+### 11.5. 成果物保存
+
+成果物は Markdown として保存する。
+
+| 成果物 | 保存名 |
+| --- | --- |
+| 真の設計書 | `true-design.md` |
+| ドキュメント差分レポート | `document-drift-report.md` |
+
+保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
+
+### 11.6. 環境変数
+
+| 変数名 | 必須 | 既定値 | 用途 |
+| --- | --- | --- | --- |
+| `GEMINI_API_KEY` | 条件付き | なし | Gemini API キー。dry-run 無効時は必須 |
+| `GEMINI_MODEL` | 任意 | `gemini-3.1-flash-lite` | 使用する Gemini モデル |
+| `GEMINI_DRY_RUN` | 任意 | `false` | `true` / `1` / `yes` の場合は Gemini API を呼び出さない |
+| `FIRESTORE_JOBS_COLLECTION` | 任意 | `jobs` | ジョブ状態保存先コレクション |
+| `RESULTS_BUCKET` | 任意 | なし | 成果物保存先 bucket。未指定時はソースと同じ bucket |
+| `RESULTS_PREFIX_TEMPLATE` | 任意 | `results/{job_id}` | 成果物保存先 prefix |
+
+Gemini API で `429 RESOURCE_EXHAUSTED` が返った場合、利用可能 quota がある一時的な超過は最大2回リトライする。エラー本文に `limit: 0` が含まれる場合は、対象 Google Cloud project に利用可能な free-tier quota がない設定・課金側の問題としてリトライせず失敗させる。
