@@ -199,17 +199,18 @@ export function generatedArtifacts(trueDesignMarkdown: string, driftReportMarkdo
 }
 
 export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
-  const filePaths = inputs.sourceFiles.map((file) => file.path);
-  const dependencies = collectDependencies(inputs.sourceFiles);
-  const apiRoutes = collectApiRoutes(inputs.sourceFiles);
-  const databaseDefinitions = collectDatabaseDefinitions(inputs.sourceFiles);
+  const analysisFiles = inputs.allSourceFiles && inputs.allSourceFiles.length > 0 ? inputs.allSourceFiles : inputs.sourceFiles;
+  const filePaths = analysisFiles.map((file) => file.path);
+  const dependencies = collectDependencies(analysisFiles);
+  const apiRoutes = collectApiRoutes(analysisFiles);
+  const databaseDefinitions = collectDatabaseDefinitions(analysisFiles);
   const configFiles = filePaths.filter((filePath) => isConfigFile(filePath));
   const readmeFiles = filePaths.filter((filePath) =>
     path.basename(filePath).toLowerCase().startsWith("readme"),
   );
   const directoryTree = buildDirectoryTree(filePaths);
-  const moduleDependencyGraph = buildModuleDependencyGraph(inputs.sourceFiles);
-  const iacStructureMap = buildIaCStructureMap(inputs.sourceFiles);
+  const moduleDependencyGraph = buildModuleDependencyGraph(analysisFiles);
+  const iacStructureMap = buildIaCStructureMap(analysisFiles);
 
   const items = {
     file_structure: filePaths,
@@ -263,10 +264,11 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
  * ディレクトリツリー、モジュール依存グラフ、IaC構成要素を1ファイルにまとめる。
  */
 export function buildSourceCodeMapDocument(inputs: AnalysisInput): string {
-  const filePaths = inputs.sourceFiles.map((file) => file.path);
+  const analysisFiles = inputs.allSourceFiles && inputs.allSourceFiles.length > 0 ? inputs.allSourceFiles : inputs.sourceFiles;
+  const filePaths = analysisFiles.map((file) => file.path);
   const directoryTree = buildDirectoryTree(filePaths);
-  const moduleDependencyGraph = buildModuleDependencyGraph(inputs.sourceFiles);
-  const iacStructureMap = buildIaCStructureMap(inputs.sourceFiles);
+  const moduleDependencyGraph = buildModuleDependencyGraph(analysisFiles);
+  const iacStructureMap = buildIaCStructureMap(analysisFiles);
 
   return [
     "# ソースコードマップ（静的解析結果）",

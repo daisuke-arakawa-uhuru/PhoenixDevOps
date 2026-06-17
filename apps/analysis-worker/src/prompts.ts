@@ -5,6 +5,7 @@ export interface AnalysisInput {
   sourceFiles: Array<{ path: string; content: string }>;
   documentUris: string[];
   documentFiles: Array<{ path: string; content: string }>;
+  allSourceFiles?: Array<{ path: string; content: string }>;
 }
 
 export interface SpecificationResult {

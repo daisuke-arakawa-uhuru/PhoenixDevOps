@@ -56,6 +56,7 @@ export interface LoadedInputs {
   documentUris: string[];
   sourceFiles: Array<{ path: string; content: string }>;
   documentFiles: Array<{ path: string; content: string }>;
+  allSourceFiles?: Array<{ path: string; content: string }>;
 }
 
 export interface InputLoader {
@@ -69,6 +70,7 @@ export class ReferenceOnlyInputLoader implements InputLoader {
       documentUris: payload.documents.map((document) => document.uri),
       sourceFiles: [],
       documentFiles: [],
+      allSourceFiles: [],
     };
   }
 }
@@ -94,10 +96,8 @@ export class GcsInputLoader implements InputLoader {
 
   async load(payload: AnalysisTaskPayload): Promise<LoadedInputs> {
     const sourceData = await downloadStorageObject(this.storageClient, payload.sourceArchive);
-    const sourceFiles = limitFiles(
-      readSourceObject(payload.sourceArchive.objectName, sourceData, this.maxCharsPerFile),
-      this.maxFiles,
-    );
+    const allSourceFiles = readSourceObject(payload.sourceArchive.objectName, sourceData, this.maxCharsPerFile);
+    const sourceFiles = limitFiles(allSourceFiles, this.maxFiles);
 
     const documentFiles: Array<{ path: string; content: string }> = [];
     for (const document of payload.documents) {
@@ -118,6 +118,7 @@ export class GcsInputLoader implements InputLoader {
       documentUris: payload.documents.map((document) => document.uri),
       sourceFiles,
       documentFiles,
+      allSourceFiles,
     };
   }
 }
@@ -140,14 +141,16 @@ export class LocalFileInputLoader implements InputLoader {
   }
 
   async load(): Promise<LoadedInputs> {
+    const allSourceFiles = readSourceFiles(this.sourcePath, this.maxCharsPerFile);
     return {
       sourceArchiveUri: this.sourcePath,
       documentUris: this.documentPaths,
-      sourceFiles: limitFiles(readSourceFiles(this.sourcePath, this.maxCharsPerFile), this.maxFiles),
+      sourceFiles: limitFiles(allSourceFiles, this.maxFiles),
       documentFiles: limitFiles(
         await readDocumentFiles(this.documentPaths, this.maxCharsPerFile),
         this.maxFiles,
       ),
+      allSourceFiles,
     };
   }
 }
