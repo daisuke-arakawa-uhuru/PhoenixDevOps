@@ -44,7 +44,7 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
     const [overviewMarkdown, overviewItems] = buildSourceCodeOverview(inputs);
     const prompt = buildSourceAnalysisPrompt(payload, inputs, overviewMarkdown);
     const response = await this.geminiClient.generate(prompt);
-    const sourceCodeMapMarkdown = buildSourceCodeMapDocument(inputs);
+    const debugArtifacts = buildCodebaseMapDocuments(inputs);
     return {
       summary: joinSections(overviewMarkdown, `## Gemini抽出結果\n\n${response}`),
       extractedItems: {
@@ -53,9 +53,7 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
         source_file_count: inputs.sourceFiles.length,
         static_overview: overviewItems,
       },
-      debugArtifacts: {
-        "source-code-map.md": sourceCodeMapMarkdown,
-      },
+      debugArtifacts,
     };
   }
 }
@@ -260,40 +258,85 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
 }
 
 /**
- * ソースコードマップドキュメント（GCS保存用デバッグ成果物）を生成する。
- * ディレクトリツリー、モジュール依存グラフ、IaC構成要素を1ファイルにまとめる。
+ * 静的解析の中間成果物を4ファイルに分割して返す。
+ *
+ * - codebase-map.md   : ディレクトリツリーと統計（人間可読）
+ * - codebase-map.json : 同じ情報を構造化 JSON で出力
+ * - module-dependencies.mmd : Mermaid 生構文（コードブロックなし）
+ * - iac-structure.md  : IaC 構成要素テーブル
  */
-export function buildSourceCodeMapDocument(inputs: AnalysisInput): string {
-  const analysisFiles = inputs.allSourceFiles && inputs.allSourceFiles.length > 0 ? inputs.allSourceFiles : inputs.sourceFiles;
+export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string, string> {
+  const analysisFiles =
+    inputs.allSourceFiles && inputs.allSourceFiles.length > 0
+      ? inputs.allSourceFiles
+      : inputs.sourceFiles;
   const filePaths = analysisFiles.map((file) => file.path);
   const directoryTree = buildDirectoryTree(filePaths);
-  const moduleDependencyGraph = buildModuleDependencyGraph(analysisFiles);
+  const mermaidRaw = buildModuleDependencyMermaid(analysisFiles);
   const iacStructureMap = buildIaCStructureMap(analysisFiles);
 
-  return [
-    "# ソースコードマップ（静的解析結果）",
+  // --- codebase-map.md ---
+  const codebaseMapMd = [
+    "# コードベースマップ（静的解析結果）",
     "",
     "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
     "> Gemini による解析結果ではなく、正規表現ベースの構造抽出結果を示します。",
     "",
     "---",
     "",
-    "## 1. ディレクトリ構造",
+    "## ディレクトリ構造",
     "",
     directoryTree || "ソースファイルはありません。",
     "",
     "---",
     "",
-    "## 2. モジュール間依存グラフ",
+    "## 統計",
     "",
-    moduleDependencyGraph,
+    `- 総ファイル数: ${filePaths.length}`,
+    `- 解析対象ファイル数: ${analysisFiles.length}`,
+  ].join("\n");
+
+  // --- codebase-map.json ---
+  const codebaseMapJson = JSON.stringify(
+    {
+      generatedAt: new Date().toISOString(),
+      totalFiles: filePaths.length,
+      files: filePaths,
+    },
+    null,
+    2,
+  );
+
+  // --- module-dependencies.mmd (生 Mermaid 構文) ---
+  const moduleDependenciesMmd = mermaidRaw;
+
+  // --- iac-structure.md ---
+  const iacStructureMd = [
+    "# IaC構成要素（静的解析結果）",
+    "",
+    "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
+    "> Terraform / AWS CDK / CloudFormation / Kubernetes を対象に正規表現で抽出した構成要素を示します。",
     "",
     "---",
     "",
-    "## 3. IaC構成要素",
-    "",
     iacStructureMap,
   ].join("\n");
+
+  return {
+    "codebase-map.md": codebaseMapMd,
+    "codebase-map.json": codebaseMapJson,
+    "module-dependencies.mmd": moduleDependenciesMmd,
+    "iac-structure.md": iacStructureMd,
+  };
+}
+
+/**
+ * @deprecated buildCodebaseMapDocuments を使用してください。
+ * 後方互換のため残します。
+ */
+export function buildSourceCodeMapDocument(inputs: AnalysisInput): string {
+  const docs = buildCodebaseMapDocuments(inputs);
+  return docs["codebase-map.md"];
 }
 
 /**
@@ -362,7 +405,30 @@ const MAX_DEPENDENCY_EDGES = 50;
 export function buildModuleDependencyGraph(
   files: Array<{ path: string; content: string }>,
 ): string {
-  const edges: Array<{ from: string; to: string }> = [];
+  // (path without extension) => node alias (e.g. "n1")
+  const nodeAliasMap = new Map<string, string>();
+  let nodeCounter = 0;
+
+  function getAlias(normalizedPath: string): string {
+    if (!nodeAliasMap.has(normalizedPath)) {
+      nodeCounter++;
+      nodeAliasMap.set(normalizedPath, `n${nodeCounter}`);
+    }
+    return nodeAliasMap.get(normalizedPath)!;
+  }
+
+  /**
+   * ファイルパスから拡張子を除去してノードキーに使う。
+   * import 先は拡張子なしで書かれることが多いため、
+   * from 側（拡張子あり）と to 側（拡張子なし）を同一ノードに統一する。
+   */
+  function stripExtension(filePath: string): string {
+    const jstsExts = /\.(js|jsx|ts|tsx|mjs|cjs)$/i;
+    return filePath.replace(jstsExts, "");
+  }
+
+  const edgeSet = new Set<string>(); // 重複排除用
+  const edges: Array<{ fromKey: string; toKey: string }> = [];
 
   for (const file of files) {
     if (edges.length >= MAX_DEPENDENCY_EDGES) break;
@@ -419,11 +485,19 @@ export function buildModuleDependencyGraph(
       // 簡易パス正規化（../を解決）
       const resolved = resolveRelativePath(resolvedRaw);
 
-      const fromLabel = sanitizeMermaidLabel(file.path);
-      const toLabel = sanitizeMermaidLabel(resolved);
-      if (fromLabel && toLabel && fromLabel !== toLabel) {
-        edges.push({ from: fromLabel, to: toLabel });
-      }
+      // from は実ファイルパスから拡張子除去、to はimport先（元々拡張子なしが多い）から拡張子除去
+      // →両者を同じキー空間で扱い、同一ノードに収束させる
+      const fromKey = stripExtension(file.path);
+      const toKey = stripExtension(resolved);
+
+      if (!fromKey || !toKey || fromKey === toKey) continue;
+
+      // 重複エッジを除去
+      const edgeId = `${fromKey}\0${toKey}`;
+      if (edgeSet.has(edgeId)) continue;
+      edgeSet.add(edgeId);
+
+      edges.push({ fromKey, toKey });
       if (edges.length >= MAX_DEPENDENCY_EDGES) break;
     }
   }
@@ -432,16 +506,140 @@ export function buildModuleDependencyGraph(
     return "モジュール間の相対import依存は検出されませんでした。";
   }
 
+  // 全エッジに登場するノードのエイリアスを確定
+  for (const { fromKey, toKey } of edges) {
+    getAlias(fromKey);
+    getAlias(toKey);
+  }
+
+  // ノード宣言行: n1["path/to/file"] 形式（ダブルクォートをエスケープ）
+  const nodeDefs = [...nodeAliasMap.entries()].map(
+    ([label, alias]) => `  ${alias}["${label.replace(/"/g, "#quot;")}"]`,
+  );
+
+  const edgeLines = edges.map(
+    ({ fromKey, toKey }) => `  ${getAlias(fromKey)} --> ${getAlias(toKey)}`,
+  );
+
   const truncated = edges.length >= MAX_DEPENDENCY_EDGES;
   const lines = [
     "```mermaid",
     "graph TD",
-    ...edges.map((e) => `  ${JSON.stringify(e.from)} --> ${JSON.stringify(e.to)}`),
+    ...nodeDefs,
+    "",
+    ...edgeLines,
     "```",
   ];
   if (truncated) {
     lines.push("");
     lines.push(`> ※ エッジ数が上限（${MAX_DEPENDENCY_EDGES}件）に達したため、一部を省略しています。`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Mermaid 形式のモジュール依存グラフを生構文（コードブロックなし）で返す。
+ * .mmd ファイルへの直接書き出しに使用する。
+ */
+export function buildModuleDependencyMermaid(
+  files: Array<{ path: string; content: string }>,
+): string {
+  // (path without extension) => node alias (e.g. "n1")
+  const nodeAliasMap = new Map<string, string>();
+  let nodeCounter = 0;
+
+  function getAlias(normalizedPath: string): string {
+    if (!nodeAliasMap.has(normalizedPath)) {
+      nodeCounter++;
+      nodeAliasMap.set(normalizedPath, `n${nodeCounter}`);
+    }
+    return nodeAliasMap.get(normalizedPath)!;
+  }
+
+  function stripExtension(filePath: string): string {
+    const jstsExts = /\.(js|jsx|ts|tsx|mjs|cjs)$/i;
+    return filePath.replace(jstsExts, "");
+  }
+
+  const edgeSet = new Set<string>();
+  const edges: Array<{ fromKey: string; toKey: string }> = [];
+
+  for (const file of files) {
+    if (edges.length >= MAX_DEPENDENCY_EDGES) break;
+    if (isTestFile(file.path)) continue;
+
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    const isJsTs = ["js", "jsx", "ts", "tsx", "mjs", "cjs"].includes(ext);
+    const isPython = ext === "py";
+    const importPaths: string[] = [];
+
+    if (isJsTs) {
+      for (const match of file.content.matchAll(
+        /^import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      for (const match of file.content.matchAll(
+        /(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      for (const match of file.content.matchAll(
+        /require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+    }
+
+    if (isPython) {
+      for (const match of file.content.matchAll(
+        /^from\s+(\.+[\w./]*)\s+import/gm,
+      )) {
+        importPaths.push(match[1]);
+      }
+      for (const match of file.content.matchAll(/^import\s+(\.+[\w.]+)/gm)) {
+        importPaths.push(match[1]);
+      }
+    }
+
+    for (const importPath of importPaths) {
+      if (!importPath.startsWith(".")) continue;
+      const fromDir = file.path.includes("/")
+        ? file.path.slice(0, file.path.lastIndexOf("/"))
+        : "";
+      const resolvedRaw = fromDir ? `${fromDir}/${importPath}` : importPath;
+      const resolved = resolveRelativePath(resolvedRaw);
+      const fromKey = stripExtension(file.path);
+      const toKey = stripExtension(resolved);
+      if (!fromKey || !toKey || fromKey === toKey) continue;
+      const edgeId = `${fromKey}\0${toKey}`;
+      if (edgeSet.has(edgeId)) continue;
+      edgeSet.add(edgeId);
+      edges.push({ fromKey, toKey });
+      if (edges.length >= MAX_DEPENDENCY_EDGES) break;
+    }
+  }
+
+  if (edges.length === 0) {
+    return "%% モジュール間の相対import依存は検出されませんでした。";
+  }
+
+  for (const { fromKey, toKey } of edges) {
+    getAlias(fromKey);
+    getAlias(toKey);
+  }
+
+  const nodeDefs = [...nodeAliasMap.entries()].map(
+    ([label, alias]) => `  ${alias}["${label.replace(/"/g, "#quot;")}"]`,
+  );
+  const edgeLines = edges.map(
+    ({ fromKey, toKey }) => `  ${getAlias(fromKey)} --> ${getAlias(toKey)}`,
+  );
+
+  const lines = ["graph TD", ...nodeDefs, "", ...edgeLines];
+  if (edges.length >= MAX_DEPENDENCY_EDGES) {
+    lines.push("");
+    lines.push(`%% ※ エッジ数が上限（${MAX_DEPENDENCY_EDGES}件）に達したため、一部を省略しています。`);
   }
   return lines.join("\n");
 }
@@ -666,12 +864,7 @@ function resolveRelativePath(rawPath: string): string {
   return resolved.join("/");
 }
 
-/**
- * Mermaidラベルで使用できる文字列に変換する（特殊文字をエスケープ）。
- */
-function sanitizeMermaidLabel(value: string): string {
-  return value.trim();
-}
+// sanitizeMermaidLabel は buildModuleDependencyGraph 内の stripExtension / getAlias に統合されたため削除。
 
 export function buildDocumentOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
   const documentFiles = [...inputs.documentFiles];
