@@ -966,15 +966,60 @@ export function buildIaCStructureMap(
 /**
  * サービス境界を検出する。
  * `services/xxx/` パターンを基準にサービスをグループ化し、エントリポイントを特定する。
+ *
+ * エントリポイントは「first-match」ではなく「スコアリング」で决定する。
+ * - isAnalysisTarget() をフィルタとして使用することで、特定のディレクトリ名（.storybook 等）
+ *   をここにハードコードせず、一元管理で除外ルールを维持できる。
  */
 export function detectServiceBoundaries(
   filePaths: string[],
 ): Record<string, { type: string; entrypoint: string | null; files: string[] }> {
   const services: Record<string, { type: string; entrypoint: string | null; files: string[] }> = {};
 
-  const ENTRY_PATTERNS = ["lambda.ts", "lambda.js", "server.ts", "server.js", "main.ts", "main.js", "index.ts", "index.js", "app.ts", "app.js"];
   const FRONTEND_SIGNALS = ["src/routes/", "src/pages/", "src/App.", "public/index.html"];
   const BACKEND_SIGNALS = ["/lambda.", "/server.", "/handler."];
+
+  /**
+   * エントリポイントとしての「らしさ」スコアを返す。
+   *
+   * 設計方针：
+   *  1. isAnalysisTarget() を通過しないファイル（.storybook / playwright / テスト 等）は -1（候補外）
+   *  2. ファイル名に応じた基本スコア（lambda > server > main > index > app）
+   *  3. src/ 直下にある場合は +20 ボーナス（src/main.tsx が .storybook/main.ts より優先）
+   *  4. パスが浅い（サービスルートに近い）ほど微小ボーナス （最大10点）
+   *
+   * この関数内にディレクトリ名をハードコードしないことで汎用性を確保する。
+   */
+  function entrypointScore(filePath: string): number {
+    // ツール系ディレクトリ（.storybook / playwright / テスト 等）を一括除外
+    if (!isAnalysisTarget(filePath)) return -1;
+
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    const parts = normalized.split("/");
+    const basename = parts.at(-1) ?? "";
+
+    // ファイル名ごとの基本スコア
+    const NAME_SCORES: Record<string, number> = {
+      "lambda.ts":  100, "lambda.js":  100,
+      "server.ts":   90, "server.js":   90,
+      "main.ts":     80, "main.tsx":    80, "main.js":  80, "main.jsx":  80,
+      "index.ts":    65, "index.tsx":   65, "index.js": 65, "index.jsx": 65,
+      "app.ts":      55, "app.tsx":     55, "app.js":   55, "app.jsx":   55,
+    };
+
+    const baseScore = NAME_SCORES[basename] ?? 0;
+    if (baseScore === 0) return 0;
+
+    // src/ 直下（`src/main.tsx` 等）は +20 ボーナス
+    const srcIdx = parts.indexOf("src");
+    const isDirectlyUnderSrc = srcIdx >= 0 && parts.length - srcIdx === 2;
+    const srcBonus = isDirectlyUnderSrc ? 20 : 0;
+
+    // パスが浅いほど微小ボーナス（最大10点） —サービスルートに近いファイルを優先する補助
+    const depthBonus = Math.max(0, 10 - parts.length);
+
+    return baseScore + srcBonus + depthBonus;
+  }
 
   for (const filePath of filePaths) {
     const normalized = filePath.replaceAll("\\", "/");
@@ -996,12 +1041,6 @@ export function detectServiceBoundaries(
       } else if (normalized.includes("/infra/") || normalized.includes("/cdk/")) {
         services[svcName].type = "infrastructure";
       }
-
-      // エントリポイント候補
-      const basename = normalized.split("/").at(-1) ?? "";
-      if (!services[svcName].entrypoint && ENTRY_PATTERNS.includes(basename)) {
-        services[svcName].entrypoint = filePath;
-      }
       continue;
     }
 
@@ -1014,6 +1053,20 @@ export function detectServiceBoundaries(
       }
       services[infraName].files.push(filePath);
     }
+  }
+
+  // 全ファイルをスコアリングしてサービスごとのエントリポイントを决定する
+  for (const info of Object.values(services)) {
+    let bestScore = -1;
+    let bestPath: string | null = null;
+    for (const filePath of info.files) {
+      const score = entrypointScore(filePath);
+      if (score > bestScore) {
+        bestScore = score;
+        bestPath = filePath;
+      }
+    }
+    info.entrypoint = bestScore > 0 ? bestPath : null;
   }
 
   return services;
