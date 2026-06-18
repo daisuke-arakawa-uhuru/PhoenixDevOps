@@ -258,12 +258,14 @@ export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<
 }
 
 /**
- * 静的解析の中間成果物を4ファイルに分割して返す。
+ * 静的解析の中間成果物を複数ファイルに分割して返す。
  *
- * - codebase-map.md   : ディレクトリツリーと統計（人間可読）
- * - codebase-map.json : 同じ情報を構造化 JSON で出力
- * - module-dependencies.mmd : Mermaid 生構文（コードブロックなし）
- * - iac-structure.md  : IaC 構成要素テーブル
+ * - codebase-map.md         : ディレクトリツリー＋サービス境界（人間可読）
+ * - codebase-map.json       : サービス境界・エントリポイント付きの構造化 JSON
+ * - module-dependencies.mmd : Mermaid 生構文（コードブロックなし、上限なし）
+ * - iac-structure.md        : IaC 構成要素＋DynamoDB スキーマ＋Lambda 設定
+ * - api-spec.yaml           : OpenAPI/api-spec ファイル（存在すれば）
+ * - exported-symbols.md     : サービス別エクスポートシンボル一覧
  */
 export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string, string> {
   const analysisFiles =
@@ -273,14 +275,32 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
   const filePaths = analysisFiles.map((file) => file.path);
   const directoryTree = buildDirectoryTree(filePaths);
   const mermaidRaw = buildModuleDependencyMermaid(analysisFiles);
-  const iacStructureMap = buildIaCStructureMap(analysisFiles);
+  const iacStructureMd = buildIaCStructureMap(analysisFiles);
+  const serviceBoundaries = detectServiceBoundaries(filePaths);
+  const exportedSymbolsMd = buildExportedSymbolsDocument(analysisFiles, serviceBoundaries);
+  const apiSpecFiles = extractApiSpecFiles(analysisFiles);
 
   // --- codebase-map.md ---
+  const servicesSummary = Object.entries(serviceBoundaries)
+    .map(([name, info]) => [
+      `### ${name}`,
+      `- タイプ: ${info.type}`,
+      `- エントリポイント: ${info.entrypoint ?? "不明"}`,
+      `- ファイル数: ${info.files.length}`,
+    ].join("\n"))
+    .join("\n\n");
+
   const codebaseMapMd = [
     "# コードベースマップ（静的解析結果）",
     "",
     "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
     "> Gemini による解析結果ではなく、正規表現ベースの構造抽出結果を示します。",
+    "",
+    "---",
+    "",
+    "## サービス境界",
+    "",
+    servicesSummary || "サービス境界は検出されませんでした。",
     "",
     "---",
     "",
@@ -293,7 +313,7 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
     "## 統計",
     "",
     `- 総ファイル数: ${filePaths.length}`,
-    `- 解析対象ファイル数: ${analysisFiles.length}`,
+    `- サービス数: ${Object.keys(serviceBoundaries).length}`,
   ].join("\n");
 
   // --- codebase-map.json ---
@@ -301,33 +321,27 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
     {
       generatedAt: new Date().toISOString(),
       totalFiles: filePaths.length,
+      services: serviceBoundaries,
       files: filePaths,
     },
     null,
     2,
   );
 
-  // --- module-dependencies.mmd (生 Mermaid 構文) ---
-  const moduleDependenciesMmd = mermaidRaw;
-
-  // --- iac-structure.md ---
-  const iacStructureMd = [
-    "# IaC構成要素（静的解析結果）",
-    "",
-    "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
-    "> Terraform / AWS CDK / CloudFormation / Kubernetes を対象に正規表現で抽出した構成要素を示します。",
-    "",
-    "---",
-    "",
-    iacStructureMap,
-  ].join("\n");
-
-  return {
+  const result: Record<string, string> = {
     "codebase-map.md": codebaseMapMd,
     "codebase-map.json": codebaseMapJson,
-    "module-dependencies.mmd": moduleDependenciesMmd,
+    "module-dependencies.mmd": mermaidRaw,
     "iac-structure.md": iacStructureMd,
+    "exported-symbols.md": exportedSymbolsMd,
   };
+
+  // api-spec ファイルが見つかれば追加
+  for (const [name, content] of Object.entries(apiSpecFiles)) {
+    result[name] = content;
+  }
+
+  return result;
 }
 
 /**
@@ -538,8 +552,44 @@ export function buildModuleDependencyGraph(
 }
 
 /**
+ * 解析対象外ファイルかどうかを判定する。
+ * テスト・Storybook・Playwright・プロファイル JSON・ロックファイル等を除外する。
+ */
+function isAnalysisTarget(filePath: string): boolean {
+  if (isTestFile(filePath)) return false;
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const excludedDirs = [
+    "/.storybook/",
+    "/playwright/",
+    "/profile/",
+    "/debug/",
+    "/generated/",
+    "/node_modules/",
+    "/dist/",
+    "/.github/",
+    "/.vscode/",
+  ];
+  if (excludedDirs.some((d) => normalized.includes(d))) return false;
+  const basename = normalized.split("/").at(-1) ?? "";
+  if ([
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "go.sum",
+    ".gitignore",
+    ".prettierrc",
+    ".eslintrc.js",
+    "jest.config.js",
+    "vitest.config.ts",
+    "tsconfig.json",
+  ].includes(basename)) return false;
+  return true;
+}
+
+/**
  * Mermaid 形式のモジュール依存グラフを生構文（コードブロックなし）で返す。
  * .mmd ファイルへの直接書き出しに使用する。
+ * エッジ上限なし・解析対象外ファイルを除外する。
  */
 export function buildModuleDependencyMermaid(
   files: Array<{ path: string; content: string }>,
@@ -565,8 +615,8 @@ export function buildModuleDependencyMermaid(
   const edges: Array<{ fromKey: string; toKey: string }> = [];
 
   for (const file of files) {
-    if (edges.length >= MAX_DEPENDENCY_EDGES) break;
-    if (isTestFile(file.path)) continue;
+    // 解析対象外ファイルを除外（テスト・Storybook・Playwright等）
+    if (!isAnalysisTarget(file.path)) continue;
 
     const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
     const isJsTs = ["js", "jsx", "ts", "tsx", "mjs", "cjs"].includes(ext);
@@ -616,7 +666,6 @@ export function buildModuleDependencyMermaid(
       if (edgeSet.has(edgeId)) continue;
       edgeSet.add(edgeId);
       edges.push({ fromKey, toKey });
-      if (edges.length >= MAX_DEPENDENCY_EDGES) break;
     }
   }
 
@@ -636,16 +685,12 @@ export function buildModuleDependencyMermaid(
     ({ fromKey, toKey }) => `  ${getAlias(fromKey)} --> ${getAlias(toKey)}`,
   );
 
-  const lines = ["graph TD", ...nodeDefs, "", ...edgeLines];
-  if (edges.length >= MAX_DEPENDENCY_EDGES) {
-    lines.push("");
-    lines.push(`%% ※ エッジ数が上限（${MAX_DEPENDENCY_EDGES}件）に達したため、一部を省略しています。`);
-  }
-  return lines.join("\n");
+  return ["graph TD", ...nodeDefs, "", ...edgeLines].join("\n");
 }
 
 /**
- * 各種IaCファイル（Terraform, AWS CDK, CloudFormation, Kubernetes等）を静的解析し、構成要素をMarkdownテーブルで返す。
+ * 各種IaCファイル（Terraform, AWS CDK, CloudFormation/SAM, Kubernetes等）を静的解析し、
+ * 構成要素・DynamoDB スキーマ・Lambda 設定を含む詳細 Markdown を返す。
  */
 export function buildIaCStructureMap(
   files: Array<{ path: string; content: string }>,
@@ -654,8 +699,31 @@ export function buildIaCStructureMap(
     kind: string;
     name: string;
     path: string;
+    details?: string; // 追加プロパティ（スキーマ、設定値等）
   }
+
+  interface DynamoDBTable {
+    logicalName: string;
+    tableName?: string;
+    pk?: string;
+    sk?: string;
+    gsi: string[];
+    billingMode?: string;
+    path: string;
+  }
+
+  interface LambdaFunction {
+    logicalName: string;
+    handler?: string;
+    runtime?: string;
+    envVars: Record<string, string>;
+    policies: string[];
+    path: string;
+  }
+
   const items: IaCItem[] = [];
+  const dynamoTables: DynamoDBTable[] = [];
+  const lambdaFunctions: LambdaFunction[] = [];
 
   for (const file of files) {
     if (isTestFile(file.path)) continue;
@@ -666,15 +734,11 @@ export function buildIaCStructureMap(
     if (ext === "tf") {
       for (const line of file.content.split(/\r?\n/)) {
         const stripped = line.trim();
-
-        // provider "aws" { / provider "google" {
         const providerMatch = stripped.match(/^provider\s+"([^"]+)"/);
         if (providerMatch) {
           items.push({ kind: "provider", name: providerMatch[1], path: file.path });
           continue;
         }
-
-        // resource "google_cloud_run_service" "api" {
         const resourceMatch = stripped.match(/^resource\s+"([^"]+)"\s+"([^"]+)"/);
         if (resourceMatch) {
           items.push({
@@ -684,22 +748,16 @@ export function buildIaCStructureMap(
           });
           continue;
         }
-
-        // module "vpc" {
         const moduleMatch = stripped.match(/^module\s+"([^"]+)"/);
         if (moduleMatch) {
           items.push({ kind: "module", name: moduleMatch[1], path: file.path });
           continue;
         }
-
-        // variable "project_id" {
         const variableMatch = stripped.match(/^variable\s+"([^"]+)"/);
         if (variableMatch) {
           items.push({ kind: "variable", name: variableMatch[1], path: file.path });
           continue;
         }
-
-        // output "api_url" {
         const outputMatch = stripped.match(/^output\s+"([^"]+)"/);
         if (outputMatch) {
           items.push({ kind: "output", name: outputMatch[1], path: file.path });
@@ -713,139 +771,381 @@ export function buildIaCStructureMap(
     if (ext === "ts" || ext === "js" || ext === "tsx" || ext === "jsx") {
       const normalizedPath = file.path.replaceAll("\\", "/");
       const isCdkPath = normalizedPath.includes("/cdk/") || normalizedPath.includes("cdk/");
-      const hasCdkImport = file.content.includes("aws-cdk-lib") || file.content.includes("@aws-cdk") || file.content.includes("constructs");
-      
-      if (isCdkPath || hasCdkImport) {
-        // Stack / Construct / Resource クラス定義の検出
-        const classMatches = file.content.matchAll(/class\s+([a-zA-Z0-9_$]+)\s+extends\s+(?:[a-zA-Z0-9_$]+\.)?(Stack|Construct|Resource)\b/g);
-        for (const match of classMatches) {
-          const className = match[1];
-          const baseName = match[2];
-          items.push({
-            kind: `CDK ${baseName}`,
-            name: className,
-            path: file.path
-          });
-        }
+      const hasCdkImport =
+        file.content.includes("aws-cdk-lib") ||
+        file.content.includes("@aws-cdk") ||
+        file.content.includes("constructs");
 
-        // CDK リソース構築 (new ...) の検出
-        const newMatches = file.content.matchAll(/new\s+([a-zA-Z0-9_$]+\.[a-zA-Z0-9_$]+|[A-Z][a-zA-Z0-9_$]+)\s*\(/g);
+      if (isCdkPath || hasCdkImport) {
+        const classMatches = file.content.matchAll(
+          /class\s+([a-zA-Z0-9_$]+)\s+extends\s+(?:[a-zA-Z0-9_$]+\.)?(Stack|Construct|Resource)\b/g,
+        );
+        for (const match of classMatches) {
+          items.push({ kind: `CDK ${match[2]}`, name: match[1], path: file.path });
+        }
         const excludeClassNames = new Set([
-          "App", "Stack", "Construct", "Error", "Date", "Map", "Set", "Promise", "RegExp", "Object", "Array",
-          "String", "Number", "Boolean", "CanonicalUserPrincipal", "ArnPrincipal", "ServicePrincipal",
-          "AccountRootPrincipal", "AnyPrincipal", "PolicyStatement", "StackProps", "AppProps"
+          "App", "Stack", "Construct", "Error", "Date", "Map", "Set", "Promise",
+          "RegExp", "Object", "Array", "String", "Number", "Boolean",
+          "CanonicalUserPrincipal", "ArnPrincipal", "ServicePrincipal",
+          "AccountRootPrincipal", "AnyPrincipal", "PolicyStatement",
         ]);
-        
+        const newMatches = file.content.matchAll(
+          /new\s+([a-zA-Z0-9_$]+\.[a-zA-Z0-9_$]+|[A-Z][a-zA-Z0-9_$]+)\s*\(/g,
+        );
         for (const match of newMatches) {
           const className = match[1];
           const shortName = className.includes(".") ? className.split(".").pop()! : className;
-          if (excludeClassNames.has(className) || excludeClassNames.has(shortName)) {
-            continue;
-          }
-          items.push({
-            kind: "CDK Resource",
-            name: className,
-            path: file.path
-          });
+          if (excludeClassNames.has(className) || excludeClassNames.has(shortName)) continue;
+          items.push({ kind: "CDK Resource", name: className, path: file.path });
         }
       }
       continue;
     }
 
-    // 3. CloudFormation / SAM / Kubernetes (.yaml, .yml, .json)
-    if (ext === "yaml" || ext === "yml" || ext === "json") {
-      // 3.1 CloudFormation
-      if (file.content.includes("AWSTemplateFormatVersion")) {
-        if (ext === "yaml" || ext === "yml") {
-          const lines = file.content.split(/\r?\n/);
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const typeMatch = line.match(/^(\s*)Type:\s*['"]?(AWS::[a-zA-Z0-9::]+)['"]?/);
-            if (typeMatch) {
-              const typeIndent = typeMatch[1].length;
-              const resType = typeMatch[2];
-              let resName = "Unknown";
-              for (let j = i - 1; j >= 0; j--) {
-                const prevLine = lines[j];
-                const nameMatch = prevLine.match(/^(\s*)([a-zA-Z0-9_-]+):\s*$/);
-                if (nameMatch) {
-                  const nameIndent = nameMatch[1].length;
-                  if (nameIndent < typeIndent) {
-                    resName = nameMatch[2];
-                    break;
-                  }
-                }
-              }
-              items.push({
-                kind: "CloudFormation Resource",
-                name: `${resName} (${resType})`,
-                path: file.path
-              });
-            }
-          }
-        } else {
-          // JSON
-          const matches = file.content.matchAll(/"Type"\s*:\s*"([^"]+)"/g);
-          for (const match of matches) {
-            const resType = match[1];
-            if (resType.startsWith("AWS::")) {
-              items.push({
-                kind: "CloudFormation Resource",
-                name: resType,
-                path: file.path
-              });
-            }
-          }
-        }
-      }
+    // 3. CloudFormation / SAM (.yaml, .yml, .json)
+    if ((ext === "yaml" || ext === "yml" || ext === "json") &&
+        file.content.includes("AWSTemplateFormatVersion")) {
+      const cfnLines = file.content.split(/\r?\n/);
 
-      // 3.2 Kubernetes
-      if ((ext === "yaml" || ext === "yml") && file.content.includes("apiVersion:") && file.content.includes("kind:")) {
-        let kind = "";
-        let name = "";
-        const lines = file.content.split(/\r?\n/);
-        for (const line of lines) {
-          const kindMatch = line.match(/^\s*kind:\s*([a-zA-Z0-9_-]+)/);
-          if (kindMatch) {
-            kind = kindMatch[1];
-          }
-          const nameMatch = line.match(/^\s*name:\s*([a-zA-Z0-9_-]+)/);
-          if (nameMatch && !name) {
-            name = nameMatch[1];
-          }
+      // リソースブロックを行単位でスキャン
+      for (let i = 0; i < cfnLines.length; i++) {
+        const line = cfnLines[i];
+        const typeMatch = line.match(/^(\s*)Type:\s*['"]?(AWS::[a-zA-Z0-9::]+)['"]?/);
+        if (!typeMatch) continue;
+
+        const typeIndent = typeMatch[1].length;
+        const resType = typeMatch[2];
+
+        // リソース論理名を逆探索
+        let resName = "Unknown";
+        for (let j = i - 1; j >= 0; j--) {
+          const nm = cfnLines[j].match(/^(\s*)([a-zA-Z0-9_-]+):\s*$/);
+          if (nm && nm[1].length < typeIndent) { resName = nm[2]; break; }
         }
-        if (kind && name) {
-          items.push({
-            kind: `Kubernetes ${kind}`,
-            name: name,
-            path: file.path
-          });
+
+        items.push({
+          kind: "CloudFormation Resource",
+          name: `${resName} (${resType})`,
+          path: file.path,
+        });
+
+        // --- DynamoDB テーブルの詳細抽出 ---
+        if (resType === "AWS::DynamoDB::Table") {
+          const table: DynamoDBTable = { logicalName: resName, path: file.path, gsi: [] };
+          // Properties ブロックを収集（次のトップレベルキーまで）
+          const propStart = i + 1;
+          let propEnd = cfnLines.length;
+          for (let k = propStart; k < cfnLines.length; k++) {
+            if (cfnLines[k].match(/^(\s{0,2})\w/) && k > propStart) { propEnd = k; break; }
+          }
+          const propBlock = cfnLines.slice(propStart, propEnd).join("\n");
+          const tnMatch = propBlock.match(/TableName:\s*['"]?([\w-]+)['"]?/);
+          if (tnMatch) table.tableName = tnMatch[1];
+          const bmMatch = propBlock.match(/BillingMode:\s*([\w_]+)/);
+          if (bmMatch) table.billingMode = bmMatch[1];
+          // KeySchema
+          for (const ks of propBlock.matchAll(/AttributeName:\s*([\w-]+)[\s\S]*?KeyType:\s*(HASH|RANGE)/g)) {
+            if (ks[2] === "HASH") table.pk = ks[1];
+            else table.sk = ks[1];
+          }
+          // GSI
+          for (const gsi of propBlock.matchAll(/IndexName:\s*['"]?([\w-]+)['"]?/g)) {
+            table.gsi.push(gsi[1]);
+          }
+          dynamoTables.push(table);
+        }
+
+        // --- Lambda 関数の詳細抽出 ---
+        if (resType === "AWS::Lambda::Function" || resType === "AWS::Serverless::Function") {
+          const fn: LambdaFunction = { logicalName: resName, path: file.path, envVars: {}, policies: [] };
+          const propStart2 = i + 1;
+          let propEnd2 = cfnLines.length;
+          for (let k = propStart2; k < cfnLines.length; k++) {
+            if (cfnLines[k].match(/^(\s{0,2})\w/) && k > propStart2) { propEnd2 = k; break; }
+          }
+          const propBlock2 = cfnLines.slice(propStart2, propEnd2).join("\n");
+          const hMatch = propBlock2.match(/Handler:\s*([\w./:-]+)/);
+          if (hMatch) fn.handler = hMatch[1];
+          const rtMatch = propBlock2.match(/Runtime:\s*([\w.]+)/);
+          if (rtMatch) fn.runtime = rtMatch[1];
+          // 環境変数
+          const envBlock = propBlock2.match(/Variables:([\s\S]*?)(?:\n\s{0,6}\w|$)/);
+          if (envBlock) {
+            for (const ev of envBlock[1].matchAll(/([A-Z_][A-Z0-9_]*):\s*(.+)/g)) {
+              fn.envVars[ev[1]] = ev[2].trim().slice(0, 80);
+            }
+          }
+          // ポリシー
+          for (const pol of propBlock2.matchAll(/(?:PolicyName|ManagedPolicyArn|PolicyArn):\s*['"]?([\w:/.-]+)['"]?/g)) {
+            fn.policies.push(pol[1]);
+          }
+          lambdaFunctions.push(fn);
         }
       }
+      continue;
+    }
+
+    // 4. Kubernetes (.yaml, .yml)
+    if ((ext === "yaml" || ext === "yml") &&
+        file.content.includes("apiVersion:") && file.content.includes("kind:")) {
+      let kind = "";
+      let name = "";
+      for (const line of file.content.split(/\r?\n/)) {
+        if (!kind) { const m = line.match(/^\s*kind:\s*([a-zA-Z0-9_-]+)/); if (m) kind = m[1]; }
+        if (!name) { const m = line.match(/^\s*name:\s*([a-zA-Z0-9_-]+)/); if (m) name = m[1]; }
+      }
+      if (kind && name) items.push({ kind: `Kubernetes ${kind}`, name, path: file.path });
       continue;
     }
   }
 
   // 重複排除
-  const uniqueItems: IaCItem[] = [];
   const seen = new Set<string>();
+  const uniqueItems: IaCItem[] = [];
   for (const item of items) {
     const key = `${item.kind}|${item.name}|${item.path}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueItems.push(item);
+    if (!seen.has(key)) { seen.add(key); uniqueItems.push(item); }
+  }
+
+  const sections: string[] = [
+    "# IaC構成要素（静的解析結果）",
+    "",
+    "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
+    "> Terraform / AWS CDK / CloudFormation / SAM / Kubernetes を対象に正規表現で抽出した構成要素を示します。",
+    "",
+  ];
+
+  // --- DynamoDB スキーマセクション ---
+  if (dynamoTables.length > 0) {
+    sections.push("## DynamoDB テーブルスキーマ", "");
+    for (const t of dynamoTables) {
+      sections.push(`### ${t.logicalName}${t.tableName ? ` (TableName: ${t.tableName})` : ""}`);
+      sections.push(`- ファイル: ${t.path}`);
+      if (t.pk) sections.push(`- PK (HASH): \`${t.pk}\``);
+      if (t.sk) sections.push(`- SK (RANGE): \`${t.sk}\``);
+      if (t.billingMode) sections.push(`- BillingMode: ${t.billingMode}`);
+      if (t.gsi.length > 0) sections.push(`- GSI: ${t.gsi.join(", ")}`);
+      sections.push("");
     }
   }
 
-  if (uniqueItems.length === 0) {
-    return "IaC構成要素は検出されませんでした。";
+  // --- Lambda 設定セクション ---
+  if (lambdaFunctions.length > 0) {
+    sections.push("## Lambda / Serverless 関数設定", "");
+    for (const fn of lambdaFunctions) {
+      sections.push(`### ${fn.logicalName}`);
+      sections.push(`- ファイル: ${fn.path}`);
+      if (fn.handler) sections.push(`- Handler: \`${fn.handler}\``);
+      if (fn.runtime) sections.push(`- Runtime: ${fn.runtime}`);
+      if (Object.keys(fn.envVars).length > 0) {
+        sections.push("- 環境変数:");
+        for (const [k, v] of Object.entries(fn.envVars)) {
+          sections.push(`  - \`${k}\`: ${v}`);
+        }
+      }
+      if (fn.policies.length > 0) sections.push(`- Policies: ${fn.policies.join(", ")}`);
+      sections.push("");
+    }
   }
 
-  return [
-    "| 種別 | 名前 | ファイル |",
-    "| --- | --- | --- |",
-    ...uniqueItems.map((item) => `| ${item.kind} | ${item.name} | ${item.path} |`),
-  ].join("\n");
+  // --- リソース一覧テーブル ---
+  sections.push("## リソース一覧", "");
+  if (uniqueItems.length === 0) {
+    sections.push("IaC構成要素は検出されませんでした。");
+  } else {
+    sections.push(
+      "| 種別 | 名前 | ファイル |",
+      "| --- | --- | --- |",
+      ...uniqueItems.map((item) => `| ${item.kind} | ${item.name} | ${item.path} |`),
+    );
+  }
+
+  return sections.join("\n");
+}
+
+/**
+ * サービス境界を検出する。
+ * `services/xxx/` パターンを基準にサービスをグループ化し、エントリポイントを特定する。
+ */
+export function detectServiceBoundaries(
+  filePaths: string[],
+): Record<string, { type: string; entrypoint: string | null; files: string[] }> {
+  const services: Record<string, { type: string; entrypoint: string | null; files: string[] }> = {};
+
+  const ENTRY_PATTERNS = ["lambda.ts", "lambda.js", "server.ts", "server.js", "main.ts", "main.js", "index.ts", "index.js", "app.ts", "app.js"];
+  const FRONTEND_SIGNALS = ["src/routes/", "src/pages/", "src/App.", "public/index.html"];
+  const BACKEND_SIGNALS = ["/lambda.", "/server.", "/handler."];
+
+  for (const filePath of filePaths) {
+    const normalized = filePath.replaceAll("\\", "/");
+
+    // services/xxx/ パターン
+    const svcMatch = normalized.match(/(?:^|\/)services\/([^/]+)\//);
+    if (svcMatch) {
+      const svcName = svcMatch[1];
+      if (!services[svcName]) {
+        services[svcName] = { type: "unknown", entrypoint: null, files: [] };
+      }
+      services[svcName].files.push(filePath);
+
+      // タイプ推定
+      if (FRONTEND_SIGNALS.some((s) => normalized.includes(s))) {
+        services[svcName].type = "frontend_spa";
+      } else if (BACKEND_SIGNALS.some((s) => normalized.includes(s))) {
+        services[svcName].type = "backend_api";
+      } else if (normalized.includes("/infra/") || normalized.includes("/cdk/")) {
+        services[svcName].type = "infrastructure";
+      }
+
+      // エントリポイント候補
+      const basename = normalized.split("/").at(-1) ?? "";
+      if (!services[svcName].entrypoint && ENTRY_PATTERNS.includes(basename)) {
+        services[svcName].entrypoint = filePath;
+      }
+      continue;
+    }
+
+    // infrastructures/ / infra/ トップレベルディレクトリ
+    const infraMatch = normalized.match(/(?:^|\/)(?:infrastructures|infra)\/([^/]+)\//);
+    if (infraMatch) {
+      const infraName = `infra/${infraMatch[1]}`;
+      if (!services[infraName]) {
+        services[infraName] = { type: "infrastructure", entrypoint: null, files: [] };
+      }
+      services[infraName].files.push(filePath);
+    }
+  }
+
+  return services;
+}
+
+/**
+ * OpenAPI / api-spec ファイルを検索してファイル名→内容のマップで返す。
+ * API エージェントがそのまま参照できる形式で出力する。
+ */
+export function extractApiSpecFiles(
+  files: Array<{ path: string; content: string }>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  const API_SPEC_NAMES = [
+    "api-spec.yaml", "api-spec.yml", "api-spec.json",
+    "openapi.yaml", "openapi.yml", "openapi.json",
+    "swagger.yaml", "swagger.yml", "swagger.json",
+  ];
+
+  for (const file of files) {
+    const basename = file.path.replaceAll("\\", "/").split("/").at(-1)?.toLowerCase() ?? "";
+    if (API_SPEC_NAMES.includes(basename)) {
+      // 出力キーはベース名のみ（複数ある場合はパスを含める）
+      const key = result[basename] !== undefined
+        ? `api-spec-${file.path.replaceAll("/", "-").replaceAll("\\", "-")}`
+        : basename;
+      result[key] = file.content;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * サービス別にエクスポートシンボル（関数・クラス・型・定数）を抽出し Markdown で返す。
+ * API エージェントと BL エージェントが「どのファイルが何を提供するか」を把握するためのファイル。
+ */
+export function buildExportedSymbolsDocument(
+  files: Array<{ path: string; content: string }>,
+  services: Record<string, { type: string; entrypoint: string | null; files: string[] }>,
+): string {
+  interface Symbol {
+    kind: string;
+    name: string;
+    file: string;
+  }
+
+  const symbolsByService: Record<string, Symbol[]> = {};
+  const ungrouped: Symbol[] = [];
+
+  // ファイル→サービス のルックアップ
+  const fileToService = new Map<string, string>();
+  for (const [svcName, info] of Object.entries(services)) {
+    for (const f of info.files) fileToService.set(f, svcName);
+  }
+
+  const EXPORT_PATTERNS: Array<{ re: RegExp; kind: string }> = [
+    { re: /^export\s+(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "function" },
+    { re: /^export\s+class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "class" },
+    { re: /^export\s+(?:abstract\s+)?class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "class" },
+    { re: /^export\s+interface\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "interface" },
+    { re: /^export\s+type\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/m, kind: "type" },
+    { re: /^export\s+(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "const" },
+    { re: /^export\s+enum\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "enum" },
+    { re: /^export\s+default\s+(?:function|class)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "default" },
+  ];
+
+  for (const file of files) {
+    if (!isAnalysisTarget(file.path)) continue;
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    if (!["ts", "tsx", "js", "jsx", "mjs"].includes(ext)) continue;
+
+    const foundSymbols: Symbol[] = [];
+    const lines = file.content.split(/\r?\n/);
+
+    for (const line of lines) {
+      const stripped = line.trim();
+      for (const { re, kind } of EXPORT_PATTERNS) {
+        const m = stripped.match(re);
+        if (m && m[1]) {
+          // 重複チェック
+          if (!foundSymbols.some((s) => s.name === m[1] && s.kind === kind)) {
+            foundSymbols.push({ kind, name: m[1], file: file.path });
+          }
+          break;
+        }
+      }
+    }
+
+    if (foundSymbols.length === 0) continue;
+
+    const svcName = fileToService.get(file.path);
+    if (svcName) {
+      if (!symbolsByService[svcName]) symbolsByService[svcName] = [];
+      symbolsByService[svcName].push(...foundSymbols);
+    } else {
+      ungrouped.push(...foundSymbols);
+    }
+  }
+
+  const lines: string[] = [
+    "# エクスポートシンボル一覧（静的解析結果）",
+    "",
+    "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
+    "> TypeScript/JavaScript ファイルのエクスポートシンボルを正規表現で抽出しています。",
+    "",
+    "---",
+    "",
+  ];
+
+  const allGroups: Array<[string, Symbol[]]> = [
+    ...Object.entries(symbolsByService),
+    ...(ungrouped.length > 0 ? [["(未分類)", ungrouped] as [string, Symbol[]]] : []),
+  ];
+
+  if (allGroups.length === 0) {
+    lines.push("エクスポートシンボルは検出されませんでした。");
+    return lines.join("\n");
+  }
+
+  for (const [svcName, symbols] of allGroups) {
+    lines.push(`## ${svcName}`, "");
+    lines.push(
+      "| 種別 | シンボル名 | ファイル |",
+      "| --- | --- | --- |",
+      ...symbols.map((s) => `| ${s.kind} | \`${s.name}\` | ${s.file} |`),
+    );
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
 
 /**
