@@ -7,6 +7,7 @@ import {
   generatedArtifacts,
   ExtractionResult,
 } from "./engines.js";
+import { InfrastructureAgent } from "./infra.js";
 
 export class WorkerResult {
   jobId: string;
@@ -52,6 +53,7 @@ export class AnalysisOrchestrator {
   private documentEngine: AnalysisEngine;
   private trueDesignGenerator: DesignGenerator;
   private driftReportGenerator: DesignGenerator;
+  private infrastructureAgent: InfrastructureAgent | null;
 
   constructor({
     jobRepository,
@@ -61,6 +63,7 @@ export class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+    infrastructureAgent = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -69,6 +72,7 @@ export class AnalysisOrchestrator {
     documentEngine: AnalysisEngine;
     trueDesignGenerator: DesignGenerator;
     driftReportGenerator: DesignGenerator;
+    infrastructureAgent?: InfrastructureAgent | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -77,6 +81,7 @@ export class AnalysisOrchestrator {
     this.documentEngine = documentEngine;
     this.trueDesignGenerator = trueDesignGenerator;
     this.driftReportGenerator = driftReportGenerator;
+    this.infrastructureAgent = infrastructureAgent;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -100,7 +105,11 @@ export class AnalysisOrchestrator {
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
       );
-      const artifactPaths = await this.artifactWriter.write(payload, artifacts.asFiles());
+      const files: Record<string, string> = artifacts.asFiles();
+      if (this.infrastructureAgent) {
+        files["infrastructure_spec.md"] = await this.infrastructureAgent.analyze(payload, inputs);
+      }
+      const artifactPaths = await this.artifactWriter.write(payload, files);
       await this.jobRepository.markSucceeded(payload.jobId, artifactPaths);
       return new WorkerResult({
         jobId: payload.jobId,
