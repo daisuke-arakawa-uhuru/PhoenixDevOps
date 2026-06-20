@@ -3,6 +3,7 @@ import path from "node:path";
 import { readZipEntries } from "./zip.js";
 import { Storage } from "@google-cloud/storage";
 import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
+import { filterIacFiles } from "./infra.js";
 import pdfParse from "pdf-parse";
 
 const SKIPPED_DIRS = new Set([
@@ -42,6 +43,7 @@ const TEXT_EXTENSIONS = new Set([
   ".sh",
   ".sql",
   ".swift",
+  ".template",
   ".tf",
   ".tfvars",
   ".toml",
@@ -57,6 +59,7 @@ export interface LoadedInputs {
   sourceArchiveUri: string;
   documentUris: string[];
   sourceFiles: Array<{ path: string; content: string }>;
+  infrastructureFiles: Array<{ path: string; content: string }>;
   documentFiles: Array<{ path: string; content: string }>;
 }
 
@@ -70,6 +73,7 @@ export class ReferenceOnlyInputLoader implements InputLoader {
       sourceArchiveUri: payload.sourceArchive.uri,
       documentUris: payload.documents.map((document) => document.uri),
       sourceFiles: [],
+      infrastructureFiles: [],
       documentFiles: [],
     };
   }
@@ -78,28 +82,31 @@ export class ReferenceOnlyInputLoader implements InputLoader {
 export class GcsInputLoader implements InputLoader {
   private storageClient: Storage;
   private maxFiles: number;
+  private maxInfrastructureFiles: number;
   private maxCharsPerFile: number;
 
   constructor({
     storageClient = null,
     maxFiles = 80,
+    maxInfrastructureFiles = 160,
     maxCharsPerFile = 12000,
   }: {
     storageClient?: Storage | null;
     maxFiles?: number;
+    maxInfrastructureFiles?: number;
     maxCharsPerFile?: number;
   } = {}) {
     this.storageClient = storageClient || new Storage();
     this.maxFiles = maxFiles;
+    this.maxInfrastructureFiles = maxInfrastructureFiles;
     this.maxCharsPerFile = maxCharsPerFile;
   }
 
   async load(payload: AnalysisTaskPayload): Promise<LoadedInputs> {
     const sourceData = await downloadStorageObject(this.storageClient, payload.sourceArchive);
-    const sourceFiles = limitFiles(
-      readSourceObject(payload.sourceArchive.objectName, sourceData, this.maxCharsPerFile),
-      this.maxFiles,
-    );
+    const allSourceFiles = readSourceObject(payload.sourceArchive.objectName, sourceData, this.maxCharsPerFile);
+    const sourceFiles = limitFiles(allSourceFiles, this.maxFiles);
+    const infrastructureFiles = limitFiles(filterIacFiles(allSourceFiles), this.maxInfrastructureFiles);
 
     const documentFiles: Array<{ path: string; content: string }> = [];
     for (const document of payload.documents) {
@@ -119,6 +126,7 @@ export class GcsInputLoader implements InputLoader {
       sourceArchiveUri: payload.sourceArchive.uri,
       documentUris: payload.documents.map((document) => document.uri),
       sourceFiles,
+      infrastructureFiles,
       documentFiles,
     };
   }
@@ -128,24 +136,28 @@ export class LocalFileInputLoader implements InputLoader {
   private sourcePath: string;
   private documentPaths: string[];
   private maxFiles: number;
+  private maxInfrastructureFiles: number;
   private maxCharsPerFile: number;
 
   constructor(
     sourcePath: string,
     documentPaths: string[],
-    { maxFiles = 80, maxCharsPerFile = 12000 } = {},
+    { maxFiles = 80, maxInfrastructureFiles = 160, maxCharsPerFile = 12000 } = {},
   ) {
     this.sourcePath = sourcePath;
     this.documentPaths = [...documentPaths];
     this.maxFiles = maxFiles;
+    this.maxInfrastructureFiles = maxInfrastructureFiles;
     this.maxCharsPerFile = maxCharsPerFile;
   }
 
   async load(): Promise<LoadedInputs> {
+    const allSourceFiles = readSourceFiles(this.sourcePath, this.maxCharsPerFile);
     return {
       sourceArchiveUri: this.sourcePath,
       documentUris: this.documentPaths,
-      sourceFiles: limitFiles(readSourceFiles(this.sourcePath, this.maxCharsPerFile), this.maxFiles),
+      sourceFiles: limitFiles(allSourceFiles, this.maxFiles),
+      infrastructureFiles: limitFiles(filterIacFiles(allSourceFiles), this.maxInfrastructureFiles),
       documentFiles: limitFiles(
         await readDocumentFiles(this.documentPaths, this.maxCharsPerFile),
         this.maxFiles,

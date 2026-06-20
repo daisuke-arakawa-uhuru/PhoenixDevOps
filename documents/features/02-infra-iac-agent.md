@@ -5,7 +5,7 @@ Issue #31（親 Issue #17 / STEP 2-①）の機能仕様。
 ## 1. この機能で解決すること
 
 レガシーシステムでは、インフラ構成図やネットワーク定義書が古くなり、実際のクラウド構成と乖離していることが多い。
-本エージェントは、インフラ構成と IaC（Terraform / docker-compose / Kubernetes マニフェスト）のコードを専門に解析し、
+本エージェントは、インフラ構成と IaC（Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes マニフェスト等）のコードを専門に解析し、
 **本来構成されるべきクラウドリソースとセキュリティ設計をコードから逆算・抽出**して、
 インフラ物理/論理構成仕様（`infrastructure_spec.md`）を自動生成する。
 
@@ -33,20 +33,29 @@ Issue #31（親 Issue #17 / STEP 2-①）の機能仕様。
 | Terraform | 拡張子 `.tf` / `.tfvars` / `.hcl` |
 | docker-compose | ファイル名 `docker-compose*.yml` / `compose*.yml` |
 | Kubernetes マニフェスト | `.yaml` / `.yml` かつ `apiVersion:` と `kind:` を含む |
+| AWS CDK | `cdk.json` / `cdk.context.json` / `cdk.out/` / `aws-cdk-lib`・`@aws-cdk/`・`aws_cdk` 等を含むソース |
+| Dockerfile | `Dockerfile` / `*.Dockerfile` |
+| CloudFormation 候補 | `AWSTemplateFormatVersion` または `Resources` + `AWS::` を含む YAML / JSON 等 |
+| F-01 成果物 | `codebase-map.json` / `exported-symbols-*.md` |
 
-非 IaC ファイルは prompt に含めず、IaC ファイルだけを抽出してエージェントに渡す。
+通常のソース解析用 `sourceFiles` は件数制限を受けるが、インフラ解析では別枠の `infrastructureFiles` として IaC 候補を抽出する。
+これにより、大規模リポジトリでアプリケーションコードが先に読み込まれても、後方の `infra/` や F-01 成果物を解析対象から落とさない。
+非 IaC ファイルは `infrastructure_spec.md` 用 prompt には含めず、IaC 候補だけを抽出してエージェントに渡す。
 
 ## 4. 処理の流れ
 
-1. 入力ソースから IaC ファイルのみを抽出する（`filterIacFiles`）。
+1. 入力ソース全体から IaC 候補ファイルを `infrastructureFiles` として抽出する（`filterIacFiles`）。
 2. 外部 CLI に依存しない軽量な静的構造抽出を行う（`buildIacOverview`）。
    - Terraform: provider / resource / data / module / variable / output / backend ブロック。
    - docker-compose: サービス名・イメージ・公開ポート。
    - Kubernetes: kind / name / namespace（`---` 区切りの複数ドキュメントに対応）。
+   - Dockerfile: `EXPOSE` による公開ポート。
+   - AWS CDK / CloudFormation / F-01 成果物: prompt に補助入力として渡し、Gemini が意味的な構成抽出に利用する。
    - セキュリティ着目点: セキュリティグループ/ファイアウォール、IAM・権限、暗号鍵、シークレット、公開設定をリソースタイプから分類抽出。
 3. 静的抽出結果を Markdown サマリーに整形する（`renderIacOverviewMarkdown`）。
 4. サマリーと IaC 入力本文を `[TASK: INFRASTRUCTURE_SPEC]` prompt に組み立てる（`buildInfrastructureSpecPrompt`）。
 5. Gemini API で意味的なインフラ仕様を生成し、静的サマリーと結合して `infrastructure_spec.md` を出力する。
+   - IaC 候補が 0 件の場合は Gemini API を呼び出さず、抽出不能であることを明示したフォールバック成果物を出力する。
 
 ## 5. 出力仕様（infrastructure_spec.md）
 
@@ -66,12 +75,12 @@ Gemini の生成内容が静的事実と突き合わせて検証できるよう�
 
 | 対象外 | 理由・対応方針 |
 | --- | --- |
-| CloudFormation / Pulumi 等の深い解析 | MVPでは Terraform / docker-compose / Kubernetes を対象とする |
+| CloudFormation / Pulumi 等の深い静的解析 | MVPでは CloudFormation は候補入力として扱うが、Terraform と同等のブロック解析は行わない。Pulumi は将来拡張 |
 | `terraform plan` 等の実行を伴う動的解析 | Cloud Functions 上で外部 CLI に依存しない静的解析に留める |
 | IaC のセキュリティ脆弱性スキャン（tfsec 等） | セキュリティ「設計」の抽出に留め、脆弱性診断は将来拡張 |
 | 静的構造ダンプ成果物（`iac-structure.md` 等） | Issue #30 の責務。本エージェントは意味的仕様生成に専念する |
 
 ## 7. テスト
 
-`apps/analysis-worker/test/infra.test.js` で、IaC ファイル判定・Terraform/compose/k8s の静的抽出・
-セキュリティ分類・prompt 組み立て・エージェント結合（Gemini クライアントはスタブ）を検証する。
+`apps/analysis-worker/test/infra.test.js` で、IaC ファイル判定・Terraform/compose/k8s/Dockerfile の静的抽出・
+F-01/AWS CDK/CloudFormation 候補の補助入力化・セキュリティ分類・prompt 組み立て・エージェント結合（Gemini クライアントはスタブ）・IaC なし時の Gemini 非呼び出し・通常ソース件数制限外の IaC 読み込みを検証する。

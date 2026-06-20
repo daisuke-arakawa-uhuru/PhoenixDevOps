@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   GeminiInfrastructureAgent,
   buildIacOverview,
@@ -10,6 +13,7 @@ import {
 import { AnalysisTaskPayload, StorageObjectRef } from "../src/payload.js";
 import { GeminiClient } from "../src/gemini.js";
 import { AnalysisInput } from "../src/prompts.js";
+import { LocalFileInputLoader } from "../src/storage.js";
 
 const TERRAFORM_SAMPLE = `
 terraform {
@@ -80,27 +84,48 @@ function payload(): AnalysisTaskPayload {
   });
 }
 
-function inputs(files: Array<{ path: string; content: string }>): AnalysisInput {
+function inputs(
+  files: Array<{ path: string; content: string }>,
+  infrastructureFiles?: Array<{ path: string; content: string }>,
+): AnalysisInput {
   return {
     sourceArchiveUri: "local://src.zip",
     sourceFiles: files,
+    infrastructureFiles,
     documentUris: [],
     documentFiles: [],
   };
 }
 
-test("filterIacFiles keeps Terraform, compose, and k8s manifests only", () => {
+test("filterIacFiles keeps infrastructure-specific inputs only", () => {
   const files = [
     { path: "infra/main.tf", content: TERRAFORM_SAMPLE },
     { path: "docker-compose.yml", content: COMPOSE_SAMPLE },
     { path: "k8s/deploy.yaml", content: K8S_SAMPLE },
+    { path: "Dockerfile", content: "FROM node:24\nEXPOSE 8080\n" },
+    { path: "cdk/lib/app-stack.ts", content: "import { Stack } from 'aws-cdk-lib';" },
+    {
+      path: "cloudformation/template.yaml",
+      content: "AWSTemplateFormatVersion: '2010-09-09'\nResources:\n  Bucket:\n    Type: AWS::S3::Bucket\n",
+    },
+    { path: "codebase-map.json", content: "{}" },
+    { path: "exported-symbols-infra.md", content: "# Terraform symbols" },
     { path: "src/app.ts", content: "export const x = 1;" },
     { path: "config/values.yaml", content: "replicas: 3\nname: web" },
   ];
 
   const iac = filterIacFiles(files).map((file) => file.path);
 
-  assert.deepStrictEqual(iac, ["infra/main.tf", "docker-compose.yml", "k8s/deploy.yaml"]);
+  assert.deepStrictEqual(iac, [
+    "infra/main.tf",
+    "docker-compose.yml",
+    "k8s/deploy.yaml",
+    "Dockerfile",
+    "cdk/lib/app-stack.ts",
+    "cloudformation/template.yaml",
+    "codebase-map.json",
+    "exported-symbols-infra.md",
+  ]);
 });
 
 test("buildIacOverview extracts terraform blocks and flags security resources", () => {
@@ -129,6 +154,9 @@ test("buildIacOverview parses compose services and k8s manifests", () => {
   const overview = buildIacOverview([
     { path: "docker-compose.yml", content: COMPOSE_SAMPLE },
     { path: "k8s/deploy.yaml", content: K8S_SAMPLE },
+    { path: "Dockerfile", content: "FROM node:24\nEXPOSE 3000/tcp 8080\n" },
+    { path: "cdk/lib/app-stack.ts", content: "import * as cdk from 'aws-cdk-lib';" },
+    { path: "codebase-map.json", content: "{}" },
   ]);
 
   assert.deepStrictEqual(
@@ -142,6 +170,10 @@ test("buildIacOverview parses compose services and k8s manifests", () => {
     ["Deployment/web", "Service/web-svc"],
   );
   assert.strictEqual(overview.k8sManifests[0].namespace, "prod");
+  assert.deepStrictEqual(overview.dockerfiles, ["Dockerfile"]);
+  assert.deepStrictEqual(overview.cdkFiles, ["cdk/lib/app-stack.ts"]);
+  assert.deepStrictEqual(overview.f01ArtifactFiles, ["codebase-map.json"]);
+  assert.ok(overview.securityFindings.some((finding) => finding.detail.includes("EXPOSE 3000/tcp")));
 });
 
 test("renderIacOverviewMarkdown reports when no IaC is present", () => {
@@ -187,4 +219,59 @@ test("GeminiInfrastructureAgent composes the spec from overview and Gemini outpu
   assert.match(spec, /ジョブID: job-infra-1/);
   assert.match(spec, /## Gemini抽出結果/);
   assert.match(spec, /GCP 上の VPC とファイアウォール構成です。/);
+});
+
+test("GeminiInfrastructureAgent uses dedicated infrastructureFiles when present", async () => {
+  const captured: string[] = [];
+  const stubClient: GeminiClient = {
+    async generate(prompt: string): Promise<string> {
+      captured.push(prompt);
+      return "## システム構成概要\n\n専用 IaC 入力から生成しました。";
+    },
+  };
+  const agent = new GeminiInfrastructureAgent(stubClient);
+
+  const spec = await agent.analyze(
+    payload(),
+    inputs(
+      [{ path: "src/app.ts", content: "export const x = 1;" }],
+      [{ path: "infra/main.tf", content: TERRAFORM_SAMPLE }],
+    ),
+  );
+
+  assert.strictEqual(captured.length, 1);
+  assert.match(captured[0], /infra\/main\.tf/);
+  assert.doesNotMatch(captured[0], /src\/app\.ts/);
+  assert.match(spec, /専用 IaC 入力から生成しました。/);
+});
+
+test("GeminiInfrastructureAgent returns fallback without Gemini when no IaC is present", async () => {
+  const stubClient: GeminiClient = {
+    async generate(): Promise<string> {
+      throw new Error("Gemini should not be called without IaC input");
+    },
+  };
+  const agent = new GeminiInfrastructureAgent(stubClient);
+
+  const spec = await agent.analyze(payload(), inputs([{ path: "src/app.ts", content: "export const x = 1;" }]));
+
+  assert.match(spec, /解析対象に IaC コードが含まれていなかった/);
+  assert.doesNotMatch(spec, /Gemini抽出結果/);
+});
+
+test("LocalFileInputLoader keeps infrastructure files outside the general source limit", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "phoenix-infra-loader-"));
+  try {
+    fs.mkdirSync(path.join(tempRoot, "zz-infra"), { recursive: true });
+    fs.writeFileSync(path.join(tempRoot, "00-app.ts"), "export const x = 1;\n", "utf8");
+    fs.writeFileSync(path.join(tempRoot, "zz-infra", "main.tf"), TERRAFORM_SAMPLE, "utf8");
+
+    const loader = new LocalFileInputLoader(tempRoot, [], { maxFiles: 1, maxInfrastructureFiles: 10 });
+    const loaded = await loader.load();
+
+    assert.deepStrictEqual(loaded.sourceFiles.map((file) => file.path), ["00-app.ts"]);
+    assert.deepStrictEqual(loaded.infrastructureFiles.map((file) => file.path), ["zz-infra/main.tf"]);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

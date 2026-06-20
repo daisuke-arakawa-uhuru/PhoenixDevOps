@@ -10,7 +10,7 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 - `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
 - `src/engines.js`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
-- `src/infra.js`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / docker-compose / Kubernetes を静的抽出し Gemini で `infrastructure_spec.md` を生成
+- `src/infra.js`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補と F-01 成果物を抽出し Gemini で `infrastructure_spec.md` を生成
 - `src/prompts.js`: Gemini に渡す prompt 生成
 - `src/local-runner.js`: ローカル実行用 CLI
 
@@ -92,7 +92,7 @@ node src/local-runner.js \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
-| `infrastructure_spec.md` | Terraform / docker-compose / Kubernetes から逆算したインフラ物理/論理構成・セキュリティ設計（Issue #31） |
+| `infrastructure_spec.md` | Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補から逆算したインフラ物理/論理構成・セキュリティ設計（Issue #31） |
 
 ## 環境変数
 
@@ -132,4 +132,4 @@ gcloud functions deploy analysis-worker \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest
 ```
 
-現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。インフラ・IaC個別解析エージェント（`src/infra.js`）は外部 CLI に依存せず、Terraform の provider/resource/data/module/variable/output/backend、docker-compose のサービス、Kubernetes マニフェストを静的抽出し、セキュリティグループ/ファイアウォール・IAM 等のセキュリティ関連リソースを着目点として整理した上で Gemini に渡します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。インフラ・IaC個別解析エージェント（`src/infra.js`）は外部 CLI に依存せず、通常のソース解析用 `sourceFiles` とは別枠の `infrastructureFiles` として IaC 候補を抽出します。Terraform の provider/resource/data/module/variable/output/backend、docker-compose のサービス、Kubernetes マニフェスト、Dockerfile の `EXPOSE` を静的抽出し、AWS CDK / CloudFormation 候補と F-01 成果物（`codebase-map.json` / `exported-symbols-*.md`）は補助入力として Gemini に渡します。IaC 候補がない場合は Gemini API を呼び出さず、フォールバックの `infrastructure_spec.md` を出力します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
