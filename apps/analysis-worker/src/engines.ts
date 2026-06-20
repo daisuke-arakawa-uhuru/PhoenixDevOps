@@ -277,7 +277,6 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
   const mermaidRaw = buildModuleDependencyMermaid(analysisFiles);
   const iacStructureMd = buildIaCStructureMap(analysisFiles);
   const serviceBoundaries = detectServiceBoundaries(filePaths);
-  const exportedSymbolsMd = buildExportedSymbolsDocument(analysisFiles, serviceBoundaries);
   const apiSpecFiles = extractApiSpecFiles(analysisFiles);
 
   // --- codebase-map.md ---
@@ -294,7 +293,7 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
     "# コードベースマップ（静的解析結果）",
     "",
     "> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。",
-    "> Gemini による解析結果ではなく、正規表現ベースの構造抽出結果を示します。",
+    "> Gemini による解析結果ではなく、正規表現ベース of 構造抽出結果を示します。",
     "",
     "---",
     "",
@@ -333,8 +332,14 @@ export function buildCodebaseMapDocuments(inputs: AnalysisInput): Record<string,
     "codebase-map.json": codebaseMapJson,
     "module-dependencies.mmd": mermaidRaw,
     "iac-structure.md": iacStructureMd,
-    "exported-symbols.md": exportedSymbolsMd,
   };
+
+  // サービスごとのエクスポートシンボル分割書き出し
+  const symbolsByService = buildExportedSymbolsByService(analysisFiles, serviceBoundaries);
+  for (const [svcName, content] of Object.entries(symbolsByService)) {
+    const safeSvcName = svcName.replaceAll("/", "-");
+    result[`exported-symbols-${safeSvcName}.md`] = content;
+  }
 
   // api-spec ファイルが見つかれば追加
   for (const [name, content] of Object.entries(apiSpecFiles)) {
@@ -1199,6 +1204,115 @@ export function buildExportedSymbolsDocument(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * サービス別にエクスポートシンボルを分割してマップで返却する
+ */
+export function buildExportedSymbolsByService(
+  files: Array<{ path: string; content: string }>,
+  services: Record<string, { type: string; entrypoint: string | null; files: string[] }>,
+): Record<string, string> {
+  interface Symbol {
+    kind: string;
+    name: string;
+    file: string;
+  }
+
+  const result: Record<string, string> = {};
+  
+  // ファイル→サービス のルックアップ
+  const fileToService = new Map<string, string>();
+  for (const [svcName, info] of Object.entries(services)) {
+    for (const f of info.files) fileToService.set(f, svcName);
+  }
+
+  const EXPORT_PATTERNS: Array<{ re: RegExp; kind: string }> = [
+    { re: /^export\s+(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "function" },
+    { re: /^export\s+class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "class" },
+    { re: /^export\s+(?:abstract\s+)?class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "class" },
+    { re: /^export\s+interface\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "interface" },
+    { re: /^export\s+type\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/m, kind: "type" },
+    { re: /^export\s+(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "const" },
+    { re: /^export\s+enum\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "enum" },
+    { re: /^export\s+default\s+(?:function|class)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/m, kind: "default" },
+  ];
+
+  const symbolsByService: Record<string, Symbol[]> = {};
+  const ungrouped: Symbol[] = [];
+
+  for (const file of files) {
+    if (!isAnalysisTarget(file.path)) continue;
+    const ext = file.path.split(".").pop()?.toLowerCase() ?? "";
+    if (!["ts", "tsx", "js", "jsx", "mjs"].includes(ext)) continue;
+
+    const foundSymbols: Symbol[] = [];
+    const lines = file.content.split(/\r?\n/);
+
+    for (const line of lines) {
+      const stripped = line.trim();
+      for (const { re, kind } of EXPORT_PATTERNS) {
+        const m = stripped.match(re);
+        if (m && m[1]) {
+          if (!foundSymbols.some((s) => s.name === m[1] && s.kind === kind)) {
+            foundSymbols.push({ kind, name: m[1], file: file.path });
+          }
+          break;
+        }
+      }
+    }
+
+    if (foundSymbols.length === 0) continue;
+
+    const svcName = fileToService.get(file.path);
+    if (svcName) {
+      if (!symbolsByService[svcName]) symbolsByService[svcName] = [];
+      symbolsByService[svcName].push(...foundSymbols);
+    } else {
+      ungrouped.push(...foundSymbols);
+    }
+  }
+
+  // サービスごとに個別の Markdown を生成
+  for (const [svcName, symbols] of Object.entries(symbolsByService)) {
+    const info = services[svcName];
+    const md = [
+      `# エクスポートシンボル一覧（${svcName}）`,
+      "",
+      `> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。`,
+      `> サービス: \`${svcName}\` (タイプ: \`${info?.type ?? "unknown"}\`) のシンボルを示します。`,
+      "",
+      "---",
+      "",
+      "| 種別 | シンボル名 | ファイル |",
+      "| --- | --- | --- |",
+      ...symbols.map((s) => `| ${s.kind} | \`${s.name}\` | ${s.file} |`),
+      "",
+    ].join("\n");
+    
+    result[svcName] = md;
+  }
+
+  // 未分類の共通シンボル
+  if (ungrouped.length > 0) {
+    const md = [
+      `# エクスポートシンボル一覧（未分類）`,
+      "",
+      `> このファイルは analysis-worker の静的解析フェーズで自動生成されたデバッグ用中間成果物です。`,
+      `> どのサービス境界にも属さなかった共通ファイル等のシンボルを示します。`,
+      "",
+      "---",
+      "",
+      "| 種別 | シンボル名 | ファイル |",
+      "| --- | --- | --- |",
+      ...ungrouped.map((s) => `| ${s.kind} | \`${s.name}\` | ${s.file} |`),
+      "",
+    ].join("\n");
+    
+    result["ungrouped"] = md;
+  }
+
+  return result;
 }
 
 /**
