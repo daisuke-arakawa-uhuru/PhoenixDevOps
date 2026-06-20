@@ -84,11 +84,12 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | --- | --- |
 | 対象システム | Webアプリケーションのソースコード一式を主な対象とする |
 | 言語・フレームワーク | 限定しない。ただし言語固有の深い静的解析は保証しない |
-| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README |
+| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README、IaC（Terraform, AWS CDK等） |
 | 解析対象外 | `node_modules`、`.git`、`.venv`、`__pycache__`、`dist`、`build`、`coverage`、`.next`、画像・動画などのバイナリファイル |
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
 現行ワーカーは、入力本文の Gemini prompt への詰め込み過ぎを避けるため、ソースコード・ドキュメントともに最大80ファイル、1ファイルあたり最大12,000文字を上限に読み込む。上限を超える内容は切り詰めた上で解析対象に含める。
+また、LLMに渡す前処理として、Cloud Functions 上で外部 CLI に依存しない軽量な静的構造マップを生成する。構造マップには、ディレクトリツリー、ファイルメタデータ、依存マニフェスト、JS/TS・Python・Go の import 依存候補、Terraform の provider/module/resource/data/variable/output 構造を含める。
 
 ## 6. 出力仕様
 
@@ -134,6 +135,17 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | 2. 差分一覧 | ID、分類、対象、内容、重要度、確度、根拠コード、根拠ドキュメント、推奨対応 |
 | 3. 分類定義 | 差分分類の説明 |
 | 4. 判断ルール | ソースコードを正とすること、推測を断定しないこと、根拠を明示すること |
+
+### 6.3. 解析補助成果物
+
+STEP 1 の静的解析結果として、後続の専門エージェントがコード探索で迷子にならないための補助成果物を生成する。これらは画面表示を前提にせず、バックエンド成果物として保存する。
+
+| 成果物ファイル名 | 内容 |
+| --- | --- |
+| `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補のMarkdownダンプ |
+| `module-dependencies.mmd` | モジュール間依存候補のMermaidグラフ |
+| `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
+| `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
 
 ## 7. 判断ルール
 
@@ -289,13 +301,18 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | 観点 | 抽出内容 |
 | --- | --- |
 | ファイル構成 | 読み込み対象になったソースファイルパス一覧 |
+| ディレクトリ構造 | ファイルパス一覧から生成する ASCII ツリー表示 |
 | 設定ファイル | `.env`、`package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile`、YAML/TOML/properties/conf など |
 | README | ファイル名が `README` で始まるファイル |
 | 依存関係 | `package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile` から依存名とバージョン記述を抽出 |
 | ルーティング/API候補 | FastAPI風デコレーター、Flask、Express、Django、Spring Mapping、Next.js API Routes の候補 |
 | DB定義/データモデル候補 | SQL の `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`、Django model、Prisma model |
+| モジュール間依存グラフ | JS/TS/Python の相対パス `import` / `require` を解析し、Mermaid `graph TD` 形式で出力（最大50エッジ） |
+| IaC構成要素 | 各種IaC（Terraform, AWS CDK, CloudFormation, Kubernetes等）ファイルを静的解析し、構成要素（Resource/Stack等）をMarkdownテーブルで出力 |
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
+
+事前解析の結果は、Gemini prompt への埋め込みに加え、デバッグ用中間成果物 `codebase-map.md` として Cloud Storage に保存する。
 
 ### 11.4. Gemini 生成フェーズ
 
@@ -314,10 +331,11 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 成果物は Markdown として保存する。
 
-| 成果物 | 保存名 |
-| --- | --- |
-| 真の設計書 | `true-design.md` |
-| ドキュメント差分レポート | `document-drift-report.md` |
+| 成果物 | 保存名 | 種別 |
+| --- | --- | --- |
+| 真の設計書 | `true-design.md` | Gemini 生成 |
+| ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
+| コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
 
