@@ -4,7 +4,7 @@
 
 この機能は、「ドキュメント・ドリフト検知＆真実の設計書生成エージェント」を非エンジニアや運用担当者でも簡単かつ直感的に利用できるようにするためのWeb UI（MVP用簡易画面）を提供する。
 
-古い設計ドキュメントと現在のソースコードが乖離しているシステムにおいて、ユーザーが手元のファイルをアップロードするだけで、解析の進行状況を把握し、生成された最新仕様（真の設計書）と差分レポートを美しくプレビュー・ダウンロードできる状態を作る。
+古い設計ドキュメントと現在のソースコードが乖離しているシステムにおいて、ユーザーが手元のファイルをアップロードするだけで、解析の進行状況を把握し、生成された最新仕様（真の設計書）、差分レポート、インフラ物理/論理構成仕様を美しくプレビュー・ダウンロードできる状態を作る。
 
 ---
 
@@ -18,7 +18,7 @@ MVPでは、ユーザーが迷わず1本のシナリオを完遂できるシン�
 | --- | --- | --- |
 | **UI-01** | アップロードフォーム | プロジェクト名の入力、ソースコードZIP、既存ドキュメント（複数）のアップロードを受け付け、バリデーションを行う。 |
 | **UI-02** | ジョブ進捗表示 | ジョブID発番後、解析ステータス（`queued` / `running`）をポーリングし、アニメーションとステータス表示で進行状況を可視化する。 |
-| **UI-03** | 結果表示（プレビュー） | 解析成功（`succeeded`）時に返されるMarkdownファイル（真の設計書、差分レポート）をパースし、Web画面上で美しくプレビュー表示する。 |
+| **UI-03** | 結果表示（プレビュー） | 解析成功（`succeeded`）時に返されるMarkdownファイル（真の設計書、差分レポート、インフラ物理/論理構成仕様）をパースし、Web画面上で美しくプレビュー表示する。 |
 | **UI-04** | 成果物ダウンロード | プレビュー中の各Markdownファイルを、ローカルファイル（`.md`）として即座にダウンロードできる。 |
 
 ### 2.2. MVPではやらないこと
@@ -75,12 +75,12 @@ stateDiagram-v2
 
 #### ③ 結果表示・ダウンロード画面（`ResultViewer`）
 * **タブ切り替えスイッチ**:
-  * 「真の設計書 (`true-design.md`)」と「ドキュメント差分レポート (`document-drift-report.md`)」の2枚のタブ。
+  * 「真の設計書 (`true-design.md`)」「ドキュメント差分レポート (`document-drift-report.md`)」「インフラ構成仕様 (`infrastructure_spec.md`)」の3枚のタブ。
 * **Markdownプレビューエリア**:
   * MarkdownをHTMLに変換し、スタイルを適用して表示する。
   * テーブル（表）は線や背景色を整え、コードブロックはシンタックスハイライト風の等幅フォントスタイルを適用する。
 * **ダウンロードボタン**:
-  * 「設計書をダウンロード」「レポートをダウンロード」の2つのボタン。
+  * 表示中の成果物に対応するダウンロードボタンを提供する。
   * 押下すると、ブラウザ経由でローカルに `.md` ファイルを即時保存する。
 * **「新しい解析を開始する」ボタン**:
   * クリックするとすべての状態をリセットし、①のアップロードフォーム画面に戻る。
@@ -148,14 +148,15 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
   ```
 * **レスポンス (200 OK - succeeded時)**:
   ```json
-  {
-    "jobId": "job-123",
-    "status": "succeeded",
-    "artifactPaths": {
-      "true-design.md": "gs://...",
-      "document-drift-report.md": "gs://..."
-    }
-  }
+	  {
+	    "jobId": "job-123",
+	    "status": "succeeded",
+	    "artifactPaths": {
+	      "true-design.md": "gs://...",
+	      "document-drift-report.md": "gs://...",
+	      "infrastructure_spec.md": "gs://..."
+	    }
+	  }
   ```
 * **レスポンス (200 OK - failed時)**:
   ```json
@@ -172,23 +173,28 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
 * **エンドポイント**: `GET /jobs/{jobId}/results`
 * **レスポンス (200 OK)**:
   ```json
-  {
-    "jobId": "job-123",
-    "status": "succeeded",
-    "expiresIn": 3600,
-    "artifacts": [
-      {
-        "name": "true-design.md",
-        "uri": "gs://...",
-        "url": "https://storage.googleapis.com/... (signed URL)"
-      },
-      {
-        "name": "document-drift-report.md",
-        "uri": "gs://...",
-        "url": "https://storage.googleapis.com/... (signed URL)"
-      }
-    ]
-  }
+	  {
+	    "jobId": "job-123",
+	    "status": "succeeded",
+	    "expiresIn": 3600,
+	    "artifacts": [
+	      {
+	        "name": "true-design.md",
+	        "uri": "gs://...",
+	        "url": "https://storage.googleapis.com/... (signed URL)"
+	      },
+	      {
+	        "name": "document-drift-report.md",
+	        "uri": "gs://...",
+	        "url": "https://storage.googleapis.com/... (signed URL)"
+	      },
+	      {
+	        "name": "infrastructure_spec.md",
+	        "uri": "gs://...",
+	        "url": "https://storage.googleapis.com/... (signed URL)"
+	      }
+	    ]
+	  }
   ```
 * **コンテンツ描画処理**:
   * UIは返却された各 `url`（署名付きURL）に対してブラウザから `fetch` を実行し、Markdownの生テキストデータを取得する。

@@ -35,11 +35,12 @@ Issue #31（親 Issue #17 / STEP 2-①）の機能仕様。
 | Kubernetes マニフェスト | `.yaml` / `.yml` かつ `apiVersion:` と `kind:` を含む |
 | AWS CDK | `cdk.json` / `cdk.context.json` / `cdk.out/` / `aws-cdk-lib`・`@aws-cdk/`・`aws_cdk` 等を含むソース |
 | Dockerfile | `Dockerfile` / `*.Dockerfile` |
-| CloudFormation 候補 | `AWSTemplateFormatVersion` または `Resources` + `AWS::` を含む YAML / JSON 等 |
-| F-01 成果物 | `codebase-map.json` / `exported-symbols-*.md` |
+| CloudFormation 候補 | `AWSTemplateFormatVersion` または `Resources` + `AWS::` を含む YAML / JSON / `.template` 等 |
+| STEP 1 静的解析成果物（Issue #30） | `codebase-map.json` / `exported-symbols-*.md` |
 
-通常のソース解析用 `sourceFiles` は件数制限を受けるが、インフラ解析では別枠の `infrastructureFiles` として IaC 候補を抽出する。
-これにより、大規模リポジトリでアプリケーションコードが先に読み込まれても、後方の `infra/` や F-01 成果物を解析対象から落とさない。
+通常のソース解析用 `sourceFiles` は最大80ファイルの件数制限を受けるが、インフラ解析では別枠の `infrastructureFiles` として IaC 候補を最大160ファイルまで抽出する。
+これにより、大規模リポジトリでアプリケーションコードが先に読み込まれても、後方の `infra/` や STEP 1 静的解析成果物を解析対象から落とさない。
+各ファイル本文は既存の入力ローダーと同じく最大12,000文字で切り詰める。
 非 IaC ファイルは `infrastructure_spec.md` 用 prompt には含めず、IaC 候補だけを抽出してエージェントに渡す。
 
 ## 4. 処理の流れ
@@ -50,7 +51,7 @@ Issue #31（親 Issue #17 / STEP 2-①）の機能仕様。
    - docker-compose: サービス名・イメージ・公開ポート。
    - Kubernetes: kind / name / namespace（`---` 区切りの複数ドキュメントに対応）。
    - Dockerfile: `EXPOSE` による公開ポート。
-   - AWS CDK / CloudFormation / F-01 成果物: prompt に補助入力として渡し、Gemini が意味的な構成抽出に利用する。
+   - AWS CDK / CloudFormation / STEP 1 静的解析成果物: prompt に補助入力として渡し、Gemini が意味的な構成抽出に利用する。
    - セキュリティ着目点: セキュリティグループ/ファイアウォール、IAM・権限、暗号鍵、シークレット、公開設定をリソースタイプから分類抽出。
 3. 静的抽出結果を Markdown サマリーに整形する（`renderIacOverviewMarkdown`）。
 4. サマリーと IaC 入力本文を `[TASK: INFRASTRUCTURE_SPEC]` prompt に組み立てる（`buildInfrastructureSpecPrompt`）。
@@ -78,9 +79,9 @@ Gemini の生成内容が静的事実と突き合わせて検証できるよう�
 | CloudFormation / Pulumi 等の深い静的解析 | MVPでは CloudFormation は候補入力として扱うが、Terraform と同等のブロック解析は行わない。Pulumi は将来拡張 |
 | `terraform plan` 等の実行を伴う動的解析 | Cloud Functions 上で外部 CLI に依存しない静的解析に留める |
 | IaC のセキュリティ脆弱性スキャン（tfsec 等） | セキュリティ「設計」の抽出に留め、脆弱性診断は将来拡張 |
-| 静的構造ダンプ成果物（`iac-structure.md` 等） | Issue #30 の責務。本エージェントは意味的仕様生成に専念する |
+| 静的構造ダンプ成果物（`iac-structure.md` 等） | Issue #30 の責務。本エージェントは STEP 1 静的解析成果物を補助入力として扱い、意味的仕様生成に専念する |
 
 ## 7. テスト
 
 `apps/analysis-worker/test/infra.test.js` で、IaC ファイル判定・Terraform/compose/k8s/Dockerfile の静的抽出・
-F-01/AWS CDK/CloudFormation 候補の補助入力化・セキュリティ分類・prompt 組み立て・エージェント結合（Gemini クライアントはスタブ）・IaC なし時の Gemini 非呼び出し・通常ソース件数制限外の IaC 読み込みを検証する。
+STEP 1 静的解析成果物/AWS CDK/CloudFormation 候補の補助入力化・セキュリティ分類・prompt 組み立て・エージェント結合（Gemini クライアントはスタブ）・IaC なし時の Gemini 非呼び出し・通常ソース件数制限外の IaC 読み込みを検証する。
