@@ -312,7 +312,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
 
-事前解析の結果は、Gemini prompt への埋め込みに加え、デバッグ用中間成果物 `source-code-map.md` として Cloud Storage に保存する。
+事前解析の結果は、Gemini prompt への埋め込みに加え、デバッグ用中間成果物 `codebase-map.md` として Cloud Storage に保存する。
 
 ### 11.4. Gemini 生成フェーズ
 
@@ -335,7 +335,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | --- | --- | --- |
 | 真の設計書 | `true-design.md` | Gemini 生成 |
 | ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
-| ソースコードマップ | `source-code-map.md` | 静的解析（デバッグ用中間成果物） |
+| コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
 
