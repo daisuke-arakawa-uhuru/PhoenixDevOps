@@ -10,6 +10,7 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 - `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
 - `src/engines.js`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
+- `src/business-logic.js`: ビジネスロジック・ユースケース個別解析エージェント
 - `src/code-map.js`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
 - `src/prompts.js`: Gemini に渡す prompt 生成
 - `src/local-runner.js`: ローカル実行用 CLI
@@ -92,6 +93,7 @@ node src/local-runner.js \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
+| `business_logic_spec.md` | 主要ビジネスフローの言語化、状態遷移、機能・ユースケース一覧などの仕様書 |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |

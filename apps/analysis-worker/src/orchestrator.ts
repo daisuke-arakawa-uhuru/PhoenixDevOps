@@ -7,6 +7,7 @@ import {
   generatedArtifacts,
   ExtractionResult,
 } from "./engines.js";
+import { BusinessLogicAgent } from "./business-logic.js";
 
 export class WorkerResult {
   jobId: string;
@@ -52,6 +53,7 @@ export class AnalysisOrchestrator {
   private documentEngine: AnalysisEngine;
   private trueDesignGenerator: DesignGenerator;
   private driftReportGenerator: DesignGenerator;
+  private businessLogicAgent: BusinessLogicAgent | null;
 
   constructor({
     jobRepository,
@@ -61,6 +63,7 @@ export class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+    businessLogicAgent = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -69,6 +72,7 @@ export class AnalysisOrchestrator {
     documentEngine: AnalysisEngine;
     trueDesignGenerator: DesignGenerator;
     driftReportGenerator: DesignGenerator;
+    businessLogicAgent?: BusinessLogicAgent | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -77,6 +81,7 @@ export class AnalysisOrchestrator {
     this.documentEngine = documentEngine;
     this.trueDesignGenerator = trueDesignGenerator;
     this.driftReportGenerator = driftReportGenerator;
+    this.businessLogicAgent = businessLogicAgent;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -101,12 +106,16 @@ export class AnalysisOrchestrator {
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
         sourceSpecification.artifacts,
       );
+      const files: Record<string, string> = artifacts.asFiles();
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
         ...(documentSpecification.debugArtifacts ?? {}),
       };
+      if (this.businessLogicAgent) {
+        files["business_logic_spec.md"] = await this.businessLogicAgent.analyze(payload, inputs);
+      }
       const artifactPaths = await this.artifactWriter.write(payload, {
-        ...artifacts.asFiles(),
+        ...files,
         ...debugFiles,
       });
       await this.jobRepository.markSucceeded(payload.jobId, artifactPaths);
