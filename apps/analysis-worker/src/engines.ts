@@ -1,7 +1,11 @@
-import path from "node:path";
 import { AnalysisTaskPayload } from "./payload.js";
 import { AnalysisInput, SpecificationResult } from "./prompts.js";
 import { GeminiClient } from "./gemini.js";
+import {
+  buildCodebaseMap,
+  codebaseMapArtifacts,
+  renderSourceOverviewMarkdown,
+} from "./code-map.js";
 import {
   buildDocumentExtractionPrompt,
   buildDriftReportPrompt,
@@ -11,6 +15,8 @@ import {
 
 export interface ExtractionResult extends SpecificationResult {
   extractedItems: Record<string, unknown>;
+  artifacts?: Record<string, string>;
+  debugArtifacts?: Record<string, string>;
 }
 
 export interface AnalysisEngine {
@@ -40,7 +46,12 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
   constructor(private geminiClient: GeminiClient) {}
 
   async extract(payload: AnalysisTaskPayload, inputs: AnalysisInput): Promise<ExtractionResult> {
-    const [overviewMarkdown, overviewItems] = buildSourceCodeOverview(inputs);
+    const analysisFiles =
+      inputs.allSourceFiles && inputs.allSourceFiles.length > 0
+        ? inputs.allSourceFiles
+        : inputs.sourceFiles;
+    const codebaseMap = buildCodebaseMap(analysisFiles);
+    const overviewMarkdown = renderSourceOverviewMarkdown(codebaseMap);
     const prompt = buildSourceAnalysisPrompt(payload, inputs, overviewMarkdown);
     const response = await this.geminiClient.generate(prompt);
     return {
@@ -49,8 +60,9 @@ export class GeminiSourceCodeAnalysisEngine implements AnalysisEngine {
         prompt_task: "SOURCE_ANALYSIS",
         source_archive_uri: inputs.sourceArchiveUri,
         source_file_count: inputs.sourceFiles.length,
-        static_overview: overviewItems,
+        static_overview: codebaseMap,
       },
+      artifacts: codebaseMapArtifacts(codebaseMap, analysisFiles),
     };
   }
 }
@@ -180,66 +192,23 @@ export class GeminiDriftReportGenerator implements DesignGenerator {
   }
 }
 
-export function generatedArtifacts(trueDesignMarkdown: string, driftReportMarkdown: string) {
+export function generatedArtifacts(
+  trueDesignMarkdown: string,
+  driftReportMarkdown: string,
+  extraFiles: Record<string, string> = {},
+) {
   return {
     trueDesignMarkdown,
     driftReportMarkdown,
+    extraFiles: { ...extraFiles },
     asFiles() {
       return {
         "true-design.md": this.trueDesignMarkdown,
         "document-drift-report.md": this.driftReportMarkdown,
+        ...this.extraFiles,
       };
     },
   };
-}
-
-export function buildSourceCodeOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
-  const filePaths = inputs.sourceFiles.map((file) => file.path);
-  const dependencies = collectDependencies(inputs.sourceFiles);
-  const apiRoutes = collectApiRoutes(inputs.sourceFiles);
-  const databaseDefinitions = collectDatabaseDefinitions(inputs.sourceFiles);
-  const configFiles = filePaths.filter((filePath) => isConfigFile(filePath));
-  const readmeFiles = filePaths.filter((filePath) =>
-    path.basename(filePath).toLowerCase().startsWith("readme"),
-  );
-
-  const items = {
-    file_structure: filePaths,
-    dependencies,
-    api_routes: apiRoutes,
-    database_definitions: databaseDefinitions,
-    config_files: configFiles,
-    readme_files: readmeFiles,
-  };
-
-  const lines = [
-    "## 静的構造解析結果",
-    "",
-    "### ファイル構成",
-    "",
-    ...formatBullets(filePaths, "読み込み可能なソースファイルはありません。"),
-    "",
-    "### 設定ファイル",
-    "",
-    ...formatBullets(configFiles, "設定ファイル候補は検出されませんでした。"),
-    "",
-    "### README",
-    "",
-    ...formatBullets(readmeFiles, "README候補は検出されませんでした。"),
-    "",
-    "### 依存関係",
-    "",
-    ...formatDependencyTable(dependencies),
-    "",
-    "### ルーティング/API候補",
-    "",
-    ...formatRouteTable(apiRoutes),
-    "",
-    "### DB定義/データモデル候補",
-    "",
-    ...formatDatabaseTable(databaseDefinitions),
-  ];
-  return [lines.join("\n"), items];
 }
 
 export function buildDocumentOverview(inputs: AnalysisInput): [string, Record<string, unknown>] {
@@ -272,398 +241,8 @@ export function buildDocumentOverview(inputs: AnalysisInput): [string, Record<st
   return [lines.join("\n"), items];
 }
 
-interface Dependency {
-  kind: string;
-  name: string;
-  version: string;
-  path: string;
-}
-
-function collectDependencies(files: Array<{ path: string; content: string }>): Dependency[] {
-  const dependencies: Dependency[] = [];
-  for (const file of files) {
-    const name = path.basename(file.path).toLowerCase();
-    if (name === "package.json") {
-      dependencies.push(...dependenciesFromPackageJson(file));
-    } else if (name === "requirements.txt") {
-      dependencies.push(...dependenciesFromRequirements(file));
-    } else if (name === "pyproject.toml") {
-      dependencies.push(...dependenciesFromPyproject(file));
-    } else if (name === "go.mod") {
-      dependencies.push(...dependenciesFromGoMod(file));
-    } else if (name === "gemfile") {
-      dependencies.push(...dependenciesFromGemfile(file));
-    }
-  }
-  return limitDicts(dependencies, 80);
-}
-
-function dependenciesFromPackageJson(file: { path: string; content: string }): Dependency[] {
-  let payload: any;
-  try {
-    payload = JSON.parse(file.content);
-  } catch {
-    return [];
-  }
-
-  const dependencies: Dependency[] = [];
-  for (const section of ["dependencies", "devDependencies"]) {
-    const values = payload[section];
-    if (values == null || typeof values !== "object" || Array.isArray(values)) {
-      continue;
-    }
-    for (const [name, version] of Object.entries(values).sort(([left], [right]) =>
-      left.localeCompare(right),
-    )) {
-      dependencies.push({
-        kind: section,
-        name: String(name),
-        version: String(version),
-        path: file.path,
-      });
-    }
-  }
-  return dependencies;
-}
-
-function dependenciesFromRequirements(file: { path: string; content: string }): Dependency[] {
-  const dependencies: Dependency[] = [];
-  for (const line of file.content.split(/\r?\n/)) {
-    const stripped = line.trim();
-    if (!stripped || stripped.startsWith("#") || stripped.startsWith("-")) {
-      continue;
-    }
-    dependencies.push({
-      kind: "python",
-      name: dependencyName(stripped),
-      version: stripped,
-      path: file.path,
-    });
-  }
-  return dependencies;
-}
-
-function dependenciesFromPyproject(file: { path: string; content: string }): Dependency[] {
-  const dependencies: Dependency[] = [];
-  let inDependencies = false;
-  for (const line of file.content.split(/\r?\n/)) {
-    const stripped = line.trim();
-    if (stripped.startsWith("dependencies")) {
-      inDependencies = stripped.includes("[") && !stripped.includes("]");
-      dependencies.push(
-        ...pyprojectDependencyEntries(
-          [...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]),
-          file.path,
-        ),
-      );
-      continue;
-    }
-    if (inDependencies) {
-      if (stripped.startsWith("]")) {
-        inDependencies = false;
-        continue;
-      }
-      dependencies.push(
-        ...pyprojectDependencyEntries(
-          [...stripped.matchAll(/"([^"]+)"/g)].map((match) => match[1]),
-          file.path,
-        ),
-      );
-    }
-  }
-  return dependencies;
-}
-
-function pyprojectDependencyEntries(values: string[], filePath: string): Dependency[] {
-  return values.map((value) => ({
-    kind: "python",
-    name: dependencyName(value),
-    version: value,
-    path: filePath,
-  }));
-}
-
-function dependenciesFromGoMod(file: { path: string; content: string }): Dependency[] {
-  const dependencies: Dependency[] = [];
-  for (let line of file.content.split(/\r?\n/)) {
-    line = line.trim();
-    if (!line || line.startsWith("//")) {
-      continue;
-    }
-    if (line.startsWith("require ")) {
-      line = line.slice("require ".length).trim();
-    }
-    if (line === "(" || line === ")") {
-      continue;
-    }
-    const parts = line.split(/\s+/);
-    if (parts.length >= 2 && parts[0].includes(".")) {
-      dependencies.push({
-        kind: "go",
-        name: parts[0],
-        version: parts[1],
-        path: file.path,
-      });
-    }
-  }
-  return dependencies;
-}
-
-function dependenciesFromGemfile(file: { path: string; content: string }): Dependency[] {
-  return [...file.content.matchAll(/^\s*gem\s+['"]([^'"]+)['"](?:,\s*['"]([^'"]+)['"])?/gm)].map(
-    (match) => ({
-      kind: "ruby",
-      name: match[1],
-      version: match[2] || "",
-      path: file.path,
-    }),
-  );
-}
-
-interface Route {
-  method: string;
-  path: string;
-  source: string;
-}
-
-function collectApiRoutes(files: Array<{ path: string; content: string }>): Route[] {
-  const routes: Route[] = [];
-  for (const file of files) {
-    if (isTestFile(file.path)) {
-      continue;
-    }
-    routes.push(...routesFromContent(file));
-    routes.push(...routesFromPath(file.path));
-  }
-  return limitDicts(routes, 80);
-}
-
-function routesFromContent(file: { path: string; content: string }): Route[] {
-  const routes: Route[] = [];
-  file.content.split(/\r?\n/).forEach((line, index) => {
-    const lineNumber = index + 1;
-    const stripped = line.trim();
-    routes.push(...matchPythonRoute(file.path, lineNumber, stripped));
-    routes.push(...matchFlaskRoute(file.path, lineNumber, stripped));
-    routes.push(...matchExpressRoute(file.path, lineNumber, stripped));
-    routes.push(...matchDjangoRoute(file.path, lineNumber, stripped));
-    routes.push(...matchSpringRoute(file.path, lineNumber, stripped));
-  });
-  return routes;
-}
-
-function matchPythonRoute(filePath: string, lineNumber: number, line: string): Route[] {
-  const match = line.match(
-    /^@(?:\w+\.)?(?:app|router|api)\.(get|post|put|delete|patch|options|head)\(\s*['"]([^'"]+)['"]/,
-  );
-  return match ? [routeDict(match[1].toUpperCase(), match[2], filePath, lineNumber)] : [];
-}
-
-function matchFlaskRoute(filePath: string, lineNumber: number, line: string): Route[] {
-  const match = line.match(/^@(?:\w+\.)?(?:app|bp|blueprint)\.route\(\s*['"]([^'"]+)['"]/);
-  if (!match) {
-    return [];
-  }
-  const methods = line.match(/methods\s*=\s*\[([^\]]+)\]/);
-  if (!methods) {
-    return [routeDict("GET", match[1], filePath, lineNumber)];
-  }
-  return [...methods[1].matchAll(/['"]([A-Za-z]+)['"]/g)].map((methodMatch) =>
-    routeDict(methodMatch[1].toUpperCase(), match[1], filePath, lineNumber),
-  );
-}
-
-function matchExpressRoute(filePath: string, lineNumber: number, line: string): Route[] {
-  const match = line.match(
-    /\b(?:app|router)\.(get|post|put|delete|patch|options|head|all|use)\(\s*[`'"]([^`'"]+)[`'"]/,
-  );
-  return match ? [routeDict(match[1].toUpperCase(), match[2], filePath, lineNumber)] : [];
-}
-
-function matchDjangoRoute(filePath: string, lineNumber: number, line: string): Route[] {
-  const match = line.match(/\b(?:path|re_path)\(\s*['"]([^'"]+)['"]/);
-  return match ? [routeDict("DJANGO", match[1], filePath, lineNumber)] : [];
-}
-
-function matchSpringRoute(filePath: string, lineNumber: number, line: string): Route[] {
-  const match = line.match(
-    /@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)(?:\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"])?/,
-  );
-  if (!match) {
-    return [];
-  }
-  return [
-    routeDict(
-      match[1].replace("Mapping", "").toUpperCase() || "REQUEST",
-      match[2] || "",
-      filePath,
-      lineNumber,
-    ),
-  ];
-}
-
-function routesFromPath(filePath: string): Route[] {
-  const normalized = filePath.replaceAll("\\", "/");
-  if (normalized.startsWith("pages/api/")) {
-    return [
-      routeDict(
-        "NEXT_API",
-        `/${removeExtension(normalized.slice("pages/api/".length))}`,
-        filePath,
-        0,
-      ),
-    ];
-  }
-  if (normalized.includes("/app/api/") && normalized.endsWith("/route.ts")) {
-    const route = normalized.split("/app/api/", 2)[1].slice(0, -"/route.ts".length);
-    return [routeDict("NEXT_API", `/${route}`, filePath, 0)];
-  }
-  return [];
-}
-
-interface DbDefinition {
-  kind: string;
-  name: string;
-  path: string;
-  line: string;
-}
-
-function collectDatabaseDefinitions(files: Array<{ path: string; content: string }>): DbDefinition[] {
-  const definitions: DbDefinition[] = [];
-  for (const file of files) {
-    if (!isTestFile(file.path)) {
-      definitions.push(...databaseDefinitionsFromContent(file));
-    }
-  }
-  return limitDicts(definitions, 80);
-}
-
-function databaseDefinitionsFromContent(file: { path: string; content: string }): DbDefinition[] {
-  const definitions: DbDefinition[] = [];
-  file.content.split(/\r?\n/).forEach((line, index) => {
-    const lineNumber = index + 1;
-    const stripped = line.trim();
-    const sqlMatch = stripped.match(
-      /\b(CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+INDEX)\s+([^\s(]+)/i,
-    );
-    if (sqlMatch) {
-      definitions.push({
-        kind: sqlMatch[1].toUpperCase(),
-        name: sqlMatch[2],
-        path: file.path,
-        line: String(lineNumber),
-      });
-    }
-
-    const djangoMatch = stripped.match(/^class\s+(\w+)\((?:models\.)?Model\):/);
-    if (djangoMatch) {
-      definitions.push({
-        kind: "Django model",
-        name: djangoMatch[1],
-        path: file.path,
-        line: String(lineNumber),
-      });
-    }
-
-    const prismaMatch = stripped.match(/^model\s+(\w+)\s+\{/);
-    if (prismaMatch) {
-      definitions.push({
-        kind: "Prisma model",
-        name: prismaMatch[1],
-        path: file.path,
-        line: String(lineNumber),
-      });
-    }
-  });
-  return definitions;
-}
-
-function dependencyName(requirement: string): string {
-  return requirement.split(/\s*(?:==|>=|<=|~=|!=|>|<|\[)/, 1)[0].trim();
-}
-
-function routeDict(method: string, routePath: string, filePath: string, lineNumber: number): Route {
-  return {
-    method,
-    path: routePath,
-    source: sourceReference(filePath, lineNumber),
-  };
-}
-
-function sourceReference(filePath: string, lineNumber: number): string {
-  return lineNumber <= 0 ? filePath : `${filePath}:${lineNumber}`;
-}
-
-function isConfigFile(filePath: string): boolean {
-  const name = path.basename(filePath).toLowerCase();
-  const suffix = path.extname(filePath).toLowerCase();
-  return (
-    [
-      ".env",
-      ".env.example",
-      "dockerfile",
-      "package.json",
-      "requirements.txt",
-      "pyproject.toml",
-      "go.mod",
-      "gemfile",
-      "composer.json",
-      "pom.xml",
-      "build.gradle",
-    ].includes(name) || [".yaml", ".yml", ".toml", ".properties", ".conf"].includes(suffix)
-  );
-}
-
-function isTestFile(filePath: string): boolean {
-  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
-  const parts = normalized.split("/");
-  const name = parts.at(-1) || "";
-  return (
-    parts.slice(0, -1).some((part) => ["test", "tests", "spec", "specs"].includes(part)) ||
-    name.startsWith("test_") ||
-    name.endsWith("_test.py") ||
-    name.includes(".test.") ||
-    name.includes(".spec.")
-  );
-}
-
 function formatBullets(values: string[], empty: string): string[] {
   return values.length === 0 ? [empty] : values.map((value) => `- ${value}`);
-}
-
-function formatDependencyTable(dependencies: Dependency[]): string[] {
-  if (dependencies.length === 0) {
-    return ["依存関係候補は検出されませんでした。"];
-  }
-  return [
-    "| 種別 | 名前 | バージョン/記述 | 根拠 |",
-    "| --- | --- | --- | --- |",
-    ...dependencies.map(
-      (item) => `| ${item.kind} | ${item.name} | ${item.version} | ${item.path} |`,
-    ),
-  ];
-}
-
-function formatRouteTable(routes: Route[]): string[] {
-  if (routes.length === 0) {
-    return ["ルーティング/API候補は検出されませんでした。"];
-  }
-  return [
-    "| メソッド | パス | 根拠 |",
-    "| --- | --- | --- |",
-    ...routes.map((item) => `| ${item.method} | ${item.path} | ${item.source} |`),
-  ];
-}
-
-function formatDatabaseTable(definitions: DbDefinition[]): string[] {
-  if (definitions.length === 0) {
-    return ["DB定義/データモデル候補は検出されませんでした。"];
-  }
-  return [
-    "| 種別 | 名前 | 根拠 |",
-    "| --- | --- | --- |",
-    ...definitions.map((item) => `| ${item.kind} | ${item.name} | ${item.path}:${item.line} |`),
-  ];
 }
 
 function formatDocumentTable(files: Array<{ path: string; content: string }>): string[] {
@@ -692,18 +271,9 @@ function documentStatus(file: { content: string }): string {
   return "抽出済み";
 }
 
-function limitDicts<T>(items: T[], maxItems: number): T[] {
-  return items.slice(0, maxItems);
-}
-
 function joinSections(...sections: string[]): string {
   return `${sections
     .map((section) => section.trim())
     .filter(Boolean)
     .join("\n\n")}\n`;
-}
-
-function removeExtension(value: string): string {
-  const index = value.lastIndexOf(".");
-  return index < 0 ? value : value.slice(0, index);
 }

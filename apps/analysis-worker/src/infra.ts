@@ -310,7 +310,11 @@ export class GeminiInfrastructureAgent implements InfrastructureAgent {
 }
 
 function collectInfrastructureInputs(inputs: AnalysisInput): IacFile[] {
-  const files = [...(inputs.infrastructureFiles ?? []), ...filterIacFiles(inputs.sourceFiles)];
+  const files = [
+    ...(inputs.infrastructureFiles ?? []),
+    ...filterIacFiles(inputs.allSourceFiles ?? []),
+    ...filterIacFiles(inputs.sourceFiles),
+  ];
   const seen = new Set<string>();
   return files.filter((file) => {
     if (seen.has(file.path)) {

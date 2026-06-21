@@ -86,12 +86,13 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | --- | --- |
 | 対象システム | Webアプリケーションのソースコード一式を主な対象とする |
 | 言語・フレームワーク | 限定しない。ただし言語固有の深い静的解析は保証しない |
-| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README |
+| 解析根拠 | ファイル構成、設定ファイル、ルーティング、API定義、DB定義、依存関係、README、IaC（Terraform, AWS CDK等） |
 | 解析対象外 | `node_modules`、`.git`、`.venv`、`__pycache__`、`dist`、`build`、`coverage`、`.next`、画像・動画などのバイナリファイル |
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
 現行ワーカーは、入力本文の Gemini prompt への詰め込み過ぎを避けるため、ソースコード・ドキュメントともに最大80ファイル、1ファイルあたり最大12,000文字を上限に読み込む。上限を超える内容は切り詰めた上で解析対象に含める。
 ただし `infrastructure_spec.md` 用の IaC 候補は、通常の `sourceFiles` とは別枠の `infrastructureFiles` として最大160ファイルまで抽出する。
+また、LLMに渡す前処理として、Cloud Functions 上で外部 CLI に依存しない軽量な静的構造マップを生成する。構造マップには、ディレクトリツリー、ファイルメタデータ、依存マニフェスト、JS/TS・Python・Go の import 依存候補、Terraform の provider/module/resource/data/variable/output 構造を含める。
 
 ## 6. 出力仕様
 
@@ -145,6 +146,17 @@ IaC 候補を正として、インフラの物理/論理構成とセキュリテ
 成果物ファイル名は `infrastructure_spec.md` とする。
 詳細な対象ファイル・抽出項目・フォールバック動作は [02-infra-iac-agent.md](02-infra-iac-agent.md) を参照する。
 
+### 6.4. 解析補助成果物
+
+STEP 1 の静的解析結果として、後続の専門エージェントがコード探索で迷子にならないための補助成果物を生成する。これらは画面表示を前提にせず、バックエンド成果物として保存する。
+
+| 成果物ファイル名 | 内容 |
+| --- | --- |
+| `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補のMarkdownダンプ |
+| `module-dependencies.mmd` | モジュール間依存候補のMermaidグラフ |
+| `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
+| `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
+
 ## 7. 判断ルール
 
 - 差分判定では、ソースコードを正とし、既存ドキュメントは補助情報として扱う。
@@ -187,7 +199,8 @@ Cloud Functions の HTTP レスポンスは次の方針とする。
 | 機能内コンポーネント | 解析オーケストレーター | 解析ジョブの状態管理、各解析処理、成果物生成を制御する |
 | 機能内コンポーネント | ソースコード解析 | ソースコードを正として、実装ベースの仕様を抽出する |
 | 機能内コンポーネント | ドキュメント抽出 | 既存ドキュメントの記載内容を抽出する |
-| 機能内コンポーネント | 成果物生成 | 真の設計書とドキュメント差分レポートを生成する |
+| 機能内コンポーネント | インフラ・IaC解析 | IaC 候補を正として、インフラ物理/論理構成仕様を生成する |
+| 機能内コンポーネント | 成果物生成 | 真の設計書、ドキュメント差分レポート、解析補助成果物を生成・保存する |
 
 ### 9.2. 処理シーケンス
 
@@ -200,6 +213,7 @@ sequenceDiagram
         participant Orchestrator as 解析オーケストレーター
         participant Code as ソースコード解析
         participant Docs as ドキュメント抽出
+        participant Infra as インフラ・IaC解析
         participant Generator as 成果物生成
     end
 
@@ -211,8 +225,10 @@ sequenceDiagram
     Code-->>Orchestrator: 実装ベースの仕様情報を返却
     Orchestrator->>Docs: 既存ドキュメント抽出を依頼
     Docs-->>Orchestrator: 既存仕様の記載情報を返却
-    Orchestrator->>Generator: 仕様比較・成果物生成を依頼
-    Generator-->>Orchestrator: 成果物を返却
+    Orchestrator->>Generator: 真の設計書・差分レポート生成を依頼
+    Generator-->>Orchestrator: 真の設計書・差分レポートを返却
+    Orchestrator->>Infra: IaC 候補解析を依頼
+    Infra-->>Orchestrator: インフラ物理/論理構成仕様を返却
     Orchestrator->>Orchestrator: 解析ジョブを成功に更新（succeeded）
     Orchestrator-->>Input: 成果物を返却
     Input-->>User: 成果物を表示・ダウンロード可能にする
@@ -231,7 +247,7 @@ flowchart LR
         Queue["Cloud Tasks<br/>解析ジョブキュー"]
         Firestore["Firestore<br/>解析ジョブ状態"]
         Storage["Cloud Storage<br/>ソースコード群 / 既存ドキュメント群 / 生成成果物"]
-        Gemini["Gemini API<br/>ソースコード解析 / 差分比較 / 成果物生成"]
+        Gemini["Gemini API<br/>ソースコード解析 / 差分比較 / インフラ構成仕様生成 / 成果物生成"]
     end
 
     User -->|"ソースコード群<br/>既存ドキュメント群アップロード"| Browser
@@ -241,7 +257,7 @@ flowchart LR
     ApiFunction -->|"解析ジョブ登録"| Queue
     Queue -->|"非同期起動"| WorkerFunction
     WorkerFunction -->|"ソースコード群読み込み<br/>既存ドキュメント群読み込み"| Storage
-    WorkerFunction -->|"ソースコード解析<br/>差分比較<br/>成果物生成"| Gemini
+    WorkerFunction -->|"ソースコード解析<br/>差分比較<br/>インフラ構成仕様生成<br/>成果物生成"| Gemini
     Gemini -->|"解析結果"| WorkerFunction
     WorkerFunction -->|"生成成果物保存"| Storage
     WorkerFunction -->|"状態更新"| Firestore
@@ -259,7 +275,7 @@ flowchart LR
 | API実行基盤 | Cloud Functions | 解析ジョブ作成、状態取得、成果物取得APIの実行 |
 | 非同期実行 | Cloud Tasks | 解析ジョブのキューイング、解析ワーカーの起動、リトライ制御 |
 | ジョブ状態管理 | Firestore | `queued / running / succeeded / failed` の保存 |
-| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、成果物生成 |
+| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、インフラ構成仕様生成、成果物生成 |
 | ファイル保管 | Cloud Storage | アップロードされたソースコード群、既存ドキュメント群、生成成果物の保存 |
 
 ### 10.2. 採用背景
@@ -299,13 +315,18 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | 観点 | 抽出内容 |
 | --- | --- |
 | ファイル構成 | 読み込み対象になったソースファイルパス一覧 |
+| ディレクトリ構造 | ファイルパス一覧から生成する ASCII ツリー表示 |
 | 設定ファイル | `.env`、`package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile`、YAML/TOML/properties/conf など |
 | README | ファイル名が `README` で始まるファイル |
 | 依存関係 | `package.json`、`requirements.txt`、`pyproject.toml`、`go.mod`、`Gemfile` から依存名とバージョン記述を抽出 |
 | ルーティング/API候補 | FastAPI風デコレーター、Flask、Express、Django、Spring Mapping、Next.js API Routes の候補 |
 | DB定義/データモデル候補 | SQL の `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`、Django model、Prisma model |
+| モジュール間依存グラフ | JS/TS/Python の相対パス `import` / `require` を解析し、Mermaid `graph TD` 形式で出力（最大50エッジ） |
+| IaC構成要素 | 各種IaC（Terraform, AWS CDK, CloudFormation, Kubernetes等）ファイルを静的解析し、構成要素（Resource/Stack等）をMarkdownテーブルで出力 |
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
+
+事前解析の結果は、Gemini prompt への埋め込みに加え、`codebase-map.md`、`module-dependencies.mmd`、`iac-structure.md`、`codebase-map.json` として Cloud Storage に保存する。
 
 ### 11.4. Gemini 生成フェーズ
 
@@ -325,11 +346,15 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 成果物は Markdown として保存する。
 
-| 成果物 | 保存名 |
-| --- | --- |
-| 真の設計書 | `true-design.md` |
-| ドキュメント差分レポート | `document-drift-report.md` |
-| インフラ物理/論理構成仕様 | `infrastructure_spec.md` |
+| 成果物 | 保存名 | 種別 |
+| --- | --- | --- |
+| 真の設計書 | `true-design.md` | Gemini 生成 |
+| ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
+| インフラ物理/論理構成仕様 | `infrastructure_spec.md` | Gemini 生成 |
+| コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
+| モジュール依存グラフ | `module-dependencies.mmd` | 静的解析（デバッグ用中間成果物） |
+| IaC構造ダンプ | `iac-structure.md` | 静的解析（デバッグ用中間成果物） |
+| コードベースマップJSON | `codebase-map.json` | 静的解析（後続エージェント向け構造化成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
 

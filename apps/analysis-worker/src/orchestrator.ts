@@ -104,12 +104,20 @@ export class AnalysisOrchestrator {
       const artifacts = generatedArtifacts(
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
+        sourceSpecification.artifacts,
       );
       const files: Record<string, string> = artifacts.asFiles();
+      const debugFiles = {
+        ...(sourceSpecification.debugArtifacts ?? {}),
+        ...(documentSpecification.debugArtifacts ?? {}),
+      };
       if (this.infrastructureAgent) {
         files["infrastructure_spec.md"] = await this.infrastructureAgent.analyze(payload, inputs);
       }
-      const artifactPaths = await this.artifactWriter.write(payload, files);
+      const artifactPaths = await this.artifactWriter.write(payload, {
+        ...files,
+        ...debugFiles,
+      });
       await this.jobRepository.markSucceeded(payload.jobId, artifactPaths);
       return new WorkerResult({
         jobId: payload.jobId,
