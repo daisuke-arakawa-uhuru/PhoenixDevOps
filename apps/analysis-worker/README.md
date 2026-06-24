@@ -70,19 +70,68 @@ npm test
 
 ## ローカル実行
 
-依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。dry-run を明示した場合のみ `GEMINI_API_KEY` は不要です。
+依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。
+
+### 1. 依存関係のインストール
 
 ```bash
 cd apps/analysis-worker
 npm install
+```
 
-node src/local-runner.js \
-  --source "/path/to/input/CustomerServiceManagement.zip" \
-  --document "/path/to/input/architecture_design.pdf" \
+### 2. APIキー（Google AI Studio）を使用するローカル実行
+
+`dry-run` を明示した場合のみ `GEMINI_API_KEY` は不要です。
+
+```bash
+npm run local -- \
+  --source "../../sample/CustomerServiceManagement/src.zip" \
+  --document "../../sample/CustomerServiceManagement/doc.pdf" \
   --project-name "MyProject" \
   --job-id "local-test-01" \
   --dry-run
 ```
+
+### 3. ADC（Vertex AI）を使用するローカル実行
+
+APIキーの代わりに Google Cloud の Application Default Credentials (ADC) を使って Vertex AI 経由で Gemini を動かす手順です。
+
+#### 3.1. Google Cloud CLI (gcloud) のパス設定
+Windows の場合、gcloud は通常以下の場所にインストールされます。パスが通っていない場合は環境変数 PATH に追加してください。
+- `%USERPROFILE%\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin`
+
+#### 3.2. ADC認証のセットアップ
+以下のコマンドを実行し、ブラウザで Google アカウントにサインインして認証情報を取得します。
+```bash
+gcloud auth application-default login
+```
+
+#### 3.3. Vertex AI API の有効化
+対象の Google Cloud プロジェクトで Vertex AI API を有効にします。
+```bash
+gcloud services enable aiplatform.googleapis.com --project=<GCP_PROJECT_ID>
+```
+
+#### 3.4. 環境変数の設定
+`apps/analysis-worker/.env` に、以下のように `GEMINI_USE_VERTEX_AI=true` と使用するプロジェクト ID、ロケーションを設定します。
+```env
+GEMINI_USE_VERTEX_AI=true
+GOOGLE_CLOUD_PROJECT=<GCP_PROJECT_ID>
+GOOGLE_CLOUD_LOCATION=asia-northeast1
+GEMINI_DRY_RUN=false
+```
+※ 競合を避けるため、`GEMINI_API_KEY` がシステム環境変数にある場合は設定を外すか、`.env` で指定しないようにしてください。
+
+#### 3.5. 実行
+`--dry-run` を指定せずに実行します。
+```bash
+npm run local -- \
+  --source "../../sample/CustomerServiceManagement/src.zip" \
+  --document "../../sample/CustomerServiceManagement/doc.pdf" \
+  --project-name "CustomerServiceManagement"
+```
+
+### 4. 出力成果物
 
 出力先はデフォルトで `output/{job_id}/` です。変更する場合は `--output` を指定してください。
 
