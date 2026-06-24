@@ -113,13 +113,13 @@ gcloud services enable aiplatform.googleapis.com --project=<GCP_PROJECT_ID>
 ```
 
 #### 3.4. 環境変数の設定
-`apps/analysis-worker/.env` に、以下のように `GEMINI_USE_VERTEX_AI=true` と使用するプロジェクト ID、ロケーションを設定します。
+`apps/analysis-worker/.env` に、`apps/analysis-worker/.env.sample` の内容を参考に以下のように書き換えてください。
 ```env
 GEMINI_USE_VERTEX_AI=true
 GOOGLE_CLOUD_PROJECT=<GCP_PROJECT_ID>
 GOOGLE_CLOUD_LOCATION=asia-northeast1
-GEMINI_DRY_RUN=false
 ```
+
 ※ 競合を避けるため、`GEMINI_API_KEY` がシステム環境変数にある場合は設定を外すか、`.env` で指定しないようにしてください。
 
 #### 3.5. 実行
