@@ -132,6 +132,12 @@ variable "gemini_dry_run" {
   default     = false
 }
 
+variable "gemini_use_vertex_ai" {
+  description = "true の場合、Gemini API の呼び出しに Vertex AI (ADC) を使用する"
+  type        = bool
+  default     = true
+}
+
 variable "gemini_api_key_secret_id" {
   description = "GEMINI_API_KEY として参照する Secret Manager secret ID。未指定時は環境変数を設定しない。"
   type        = string

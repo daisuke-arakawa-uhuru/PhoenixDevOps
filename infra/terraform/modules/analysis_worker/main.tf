@@ -74,6 +74,12 @@ resource "google_project_iam_member" "worker_firestore_user" {
   member  = "serviceAccount:${google_service_account.worker.email}"
 }
 
+resource "google_project_iam_member" "worker_vertex_ai_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.worker.email}"
+}
+
 resource "google_project_iam_member" "build_storage_object_viewer" {
   project = var.project_id
   role    = "roles/storage.objectViewer"
@@ -119,8 +125,8 @@ resource "google_cloudfunctions2_function" "worker" {
 
   lifecycle {
     precondition {
-      condition     = var.gemini_dry_run || try(length(trimspace(var.gemini_api_key_secret_id)) > 0, false)
-      error_message = "gemini_api_key_secret_id is required when gemini_dry_run is false."
+      condition     = var.gemini_dry_run || var.gemini_use_vertex_ai || try(length(trimspace(var.gemini_api_key_secret_id)) > 0, false)
+      error_message = "gemini_api_key_secret_id is required when gemini_dry_run is false and gemini_use_vertex_ai is false."
     }
   }
 
@@ -152,6 +158,9 @@ resource "google_cloudfunctions2_function" "worker" {
       RESULTS_PREFIX_TEMPLATE   = var.results_prefix_template
       GEMINI_MODEL              = var.gemini_model
       GEMINI_DRY_RUN            = tostring(var.gemini_dry_run)
+      GEMINI_USE_VERTEX_AI      = tostring(var.gemini_use_vertex_ai)
+      GEMINI_PROJECT            = var.project_id
+      GEMINI_LOCATION           = var.location
     }
 
     dynamic "secret_environment_variables" {
@@ -169,6 +178,7 @@ resource "google_cloudfunctions2_function" "worker" {
   depends_on = [
     time_sleep.wait_for_build_iam_propagation,
     google_project_iam_member.worker_firestore_user,
+    google_project_iam_member.worker_vertex_ai_user,
     google_secret_manager_secret_iam_member.worker_gemini_api_key_accessor,
     google_storage_bucket_iam_member.worker_assets_object_admin,
   ]

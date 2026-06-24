@@ -4,19 +4,31 @@ export class GeminiSettings {
   apiKey: string | null;
   model: string;
   dryRun: boolean;
+  useVertexAi: boolean;
+  project: string | null;
+  location: string | null;
 
   constructor({
     apiKey = null,
     model = "gemini-3.1-flash-lite",
     dryRun = false,
+    useVertexAi,
+    project = null,
+    location = null,
   }: {
     apiKey?: string | null;
     model?: string;
     dryRun?: boolean;
+    useVertexAi?: boolean;
+    project?: string | null;
+    location?: string | null;
   } = {}) {
     this.apiKey = apiKey;
     this.model = model;
     this.dryRun = dryRun;
+    this.useVertexAi = useVertexAi !== undefined ? useVertexAi : true;
+    this.project = project;
+    this.location = location;
   }
 }
 
@@ -30,10 +42,23 @@ export class GoogleGenAIClient implements GeminiClient {
   private maxRetries: number;
 
   constructor(settings: GeminiSettings) {
-    if (!settings.apiKey) {
-      throw new Error("GEMINI_API_KEY is required when dry-run is disabled");
+    if (settings.useVertexAi) {
+      const options: Record<string, any> = {
+        vertexai: true,
+      };
+      if (settings.project) {
+        options.project = settings.project;
+      }
+      if (settings.location) {
+        options.location = settings.location;
+      }
+      this.client = new GoogleGenAI(options);
+    } else {
+      if (!settings.apiKey) {
+        throw new Error("GEMINI_API_KEY is required when dry-run is disabled");
+      }
+      this.client = new GoogleGenAI({ apiKey: settings.apiKey });
     }
-    this.client = new GoogleGenAI({ apiKey: settings.apiKey });
     this.model = settings.model;
     this.maxRetries = 2;
   }

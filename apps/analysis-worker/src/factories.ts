@@ -16,6 +16,9 @@ export function buildOrchestrator(config: WorkerConfig): AnalysisOrchestrator {
       apiKey: config.geminiApiKey,
       model: config.geminiModel,
       dryRun: config.geminiDryRun,
+      useVertexAi: config.geminiUseVertexAi,
+      project: config.geminiProject,
+      location: config.geminiLocation,
     }),
   );
 

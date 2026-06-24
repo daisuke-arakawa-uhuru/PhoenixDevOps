@@ -31,6 +31,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       apiKey: config.geminiApiKey,
       model: config.geminiModel,
       dryRun: args.dryRun || config.geminiDryRun,
+      useVertexAi: config.geminiUseVertexAi,
+      project: config.geminiProject,
+      location: config.geminiLocation,
     }),
   );
 

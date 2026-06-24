@@ -101,9 +101,12 @@ node src/local-runner.js \
 
 | 変数名 | 必須 | 説明 |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | 条件付き | Gemini API のキー。`GEMINI_DRY_RUN` が未指定または `false` の場合は必須です。 |
+| `GEMINI_API_KEY` | 条件付き | Gemini API のキー。Vertex AI (ADC) を使用しない場合かつ `GEMINI_DRY_RUN` が未指定または `false` の場合は必須です。 |
 | `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-3.1-flash-lite` |
 | `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で明示的に dry-run client を使用し、Gemini API を呼び出しません。 |
+| `GEMINI_USE_VERTEX_AI` <br/> `GOOGLE_GENAI_USE_VERTEXAI` | 任意 | `true` / `1` / `yes` で Vertex AI (ADC) 経由での呼び出しを有効にします。また、`GEMINI_API_KEY` が未指定の場合は自動的に Vertex AI (ADC) モードになります。 |
+| `GOOGLE_CLOUD_PROJECT` <br/> `GCP_PROJECT` <br/> `GEMINI_PROJECT` | 任意 | Vertex AI 使用時の Google Cloud プロジェクト ID。省略時は実行環境から自動解決されます。 |
+| `GOOGLE_CLOUD_LOCATION` <br/> `GCP_LOCATION` <br/> `GEMINI_LOCATION` | 任意 | Vertex AI 使用時のロケーション（例: `asia-northeast1`）。省略時は実行環境から自動解決されます。 |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | ジョブ状態を保存する Firestore コレクション。デフォルト: `jobs` |
 | `RESULTS_BUCKET` | 任意 | 成果物保存先 bucket。未指定時は source archive と同じ bucket を使います。 |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | 成果物 prefix。デフォルト: `results/{job_id}` |
@@ -121,8 +124,9 @@ Gemini API quota がありません。Google AI Studio の Billing / Rate limits
 ## Cloud Functions デプロイ例
 
 Terraform では [infra/terraform/modules/analysis_worker](../../infra/terraform/modules/analysis_worker) が
-この構成を管理します。手動デプロイで動作確認する場合の同等コマンドは以下です。
+この構成を管理します。
 
+### 1. API キーを使用する場合のデプロイ例
 ```bash
 gcloud functions deploy analysis-worker \
   --gen2 \
@@ -133,6 +137,19 @@ gcloud functions deploy analysis-worker \
   --trigger-http \
   --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest
+```
+
+### 2. ADC (Vertex AI) を使用する場合のデプロイ例
+サービスアカウントに **Vertex AI ユーザー**（`roles/aiplatform.user`）ロールを付与した上で、以下のようにシークレットキーを設定せずにデプロイします。
+```bash
+gcloud functions deploy analysis-worker \
+  --gen2 \
+  --runtime nodejs24 \
+  --region asia-northeast1 \
+  --source apps/analysis-worker \
+  --entry-point runAnalysisWorker \
+  --trigger-http \
+  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false,GEMINI_USE_VERTEX_AI=true
 ```
 
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
