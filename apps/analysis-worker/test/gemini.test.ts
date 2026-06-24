@@ -15,10 +15,23 @@ test("buildGeminiClient uses dry-run client only when explicitly enabled", () =>
   assert.ok(client instanceof DryRunGeminiClient);
 });
 
-test("buildGeminiClient uses Vertex AI client when apiKey is absent and dryRun is false (ADC fallback)", () => {
-  const client = buildGeminiClient(new GeminiSettings({ apiKey: null, dryRun: false }));
+test("buildGeminiClient uses Vertex AI client when project and location are configured", () => {
+  const client = buildGeminiClient(
+    new GeminiSettings({
+      apiKey: null,
+      dryRun: false,
+      project: "test-project",
+      location: "asia-northeast1",
+    }),
+  );
 
   assert.ok(client instanceof GoogleGenAIClient);
+});
+
+test("buildGeminiClient requires project and location when Vertex AI is enabled", () => {
+  assert.throws(() => buildGeminiClient(new GeminiSettings({ apiKey: null, dryRun: false })), {
+    message: "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required when Vertex AI is enabled",
+  });
 });
 
 test("GeminiSettings defaults useVertexAi to true", () => {

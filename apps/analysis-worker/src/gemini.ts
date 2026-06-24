@@ -43,16 +43,14 @@ export class GoogleGenAIClient implements GeminiClient {
 
   constructor(settings: GeminiSettings) {
     if (settings.useVertexAi) {
-      const options: Record<string, any> = {
+      if (!settings.project || !settings.location) {
+        throw new Error("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required when Vertex AI is enabled");
+      }
+      this.client = new GoogleGenAI({
         vertexai: true,
-      };
-      if (settings.project) {
-        options.project = settings.project;
-      }
-      if (settings.location) {
-        options.location = settings.location;
-      }
-      this.client = new GoogleGenAI(options);
+        project: settings.project,
+        location: settings.location,
+      });
     } else {
       if (!settings.apiKey) {
         throw new Error("GEMINI_API_KEY is required when dry-run is disabled");

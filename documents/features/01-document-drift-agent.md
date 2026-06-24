@@ -343,9 +343,12 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 | 変数名 | 必須 | 既定値 | 用途 |
 | --- | --- | --- | --- |
-| `GEMINI_API_KEY` | 条件付き | なし | Gemini API キー。dry-run 無効時は必須 |
+| `GEMINI_API_KEY` | 条件付き | なし | Gemini API キー。Vertex AI (ADC) を使用しない場合かつ dry-run 無効時は必須 |
 | `GEMINI_MODEL` | 任意 | `gemini-3.1-flash-lite` | 使用する Gemini モデル |
 | `GEMINI_DRY_RUN` | 任意 | `false` | `true` / `1` / `yes` の場合は Gemini API を呼び出さない |
+| `GEMINI_USE_VERTEX_AI` / `GOOGLE_GENAI_USE_VERTEXAI` | 任意 | `true` | `true` / `1` / `yes` の場合は Vertex AI (ADC) 経由で Gemini を呼び出す |
+| `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT` / `GEMINI_PROJECT` | 条件付き | なし | Vertex AI 使用時の Google Cloud プロジェクト ID |
+| `GOOGLE_CLOUD_LOCATION` / `GCP_LOCATION` / `GEMINI_LOCATION` | 条件付き | `global` | Vertex AI 使用時の endpoint location |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | `jobs` | ジョブ状態保存先コレクション |
 | `RESULTS_BUCKET` | 任意 | なし | 成果物保存先 bucket。未指定時はソースと同じ bucket |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | `results/{job_id}` | 成果物保存先 prefix |
