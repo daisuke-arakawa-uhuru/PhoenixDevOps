@@ -142,6 +142,7 @@ npm run local -- \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
@@ -203,3 +204,19 @@ gcloud functions deploy analysis-worker \
 ```
 
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+
+## ビジネスロジック解析（STEP 2-④）
+
+STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`）を入力として、ビジネスロジック・ユースケースの個別解析を行います。
+
+### 解析内容
+
+- サービス層、ドメインモデル、ユースケースのコードからビジネスロジックファイルを自動特定
+- Gemini API でビジネスフロー、条件分岐、状態遷移を解析・言語化
+- 機能一覧、ユースケースシナリオ、Mermaid形式のシーケンス図・状態遷移図を含む仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |

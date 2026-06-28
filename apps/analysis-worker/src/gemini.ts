@@ -203,6 +203,62 @@ export class DryRunGeminiClient implements GeminiClient {
         truncate(documentSummary, 2500),
       ].join("\n");
     }
+    if (prompt.includes("[TASK: BUSINESS_LOGIC_ANALYSIS]")) {
+      const codebaseMapSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: コードベースマップ（codebase-map.json）",
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+      );
+      const exportedSymbolsSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+        "## ビジネスロジック関連ソースコード",
+      );
+      return [
+        "# ビジネスロジック仕様書（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、ビジネスロジック解析フェーズの接続だけを確認しています。",
+        "",
+        "## 解析対象サマリー",
+        "",
+        "- dry-run のため実際の解析は行っていません。",
+        "",
+        "## 機能一覧",
+        "",
+        "| 機能名 | 概要 | 対象サービス | 根拠ファイル |",
+        "| --- | --- | --- | --- |",
+        "| (dry-run) | ビジネスロジック解析フェーズの接続確認 | - | - |",
+        "",
+        "## ユースケースシナリオ",
+        "",
+        "dry-run のためユースケースシナリオは生成されていません。",
+        "",
+        "## 状態遷移",
+        "",
+        "dry-run のため状態遷移は解析されていません。",
+        "",
+        "## シーケンス図",
+        "",
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant User as ユーザー",
+        "    participant System as システム",
+        "    User->>System: (dry-run) ビジネスロジック解析フェーズの接続確認",
+        "    System-->>User: (dry-run) 確認完了",
+        "```",
+        "",
+        "## 入力サマリー",
+        "",
+        "### コードベースマップ",
+        "",
+        truncate(codebaseMapSection, 2000),
+        "",
+        "### エクスポートシンボル",
+        "",
+        truncate(exportedSymbolsSection, 2000),
+      ].join("\n");
+    }
     return "Gemini dry-run response";
   }
 }
