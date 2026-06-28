@@ -96,9 +96,11 @@ const SOURCE_EXTENSIONS = new Set([
   ".jsx",
   ".kt",
   ".php",
+  ".prisma",
   ".py",
   ".rb",
   ".rs",
+  ".sql",
   ".swift",
   ".ts",
   ".tsx",
@@ -369,6 +371,9 @@ function classifyFile(filePath: string): string[] {
   if (path.extname(filePath).toLowerCase() === ".tf") {
     roles.push("iac");
   }
+  if (isDatabaseDefinitionPath(filePath)) {
+    roles.push("database_definition");
+  }
   if (roles.length === 0 && SOURCE_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
     roles.push("source");
   }
@@ -397,6 +402,7 @@ function languageFromPath(filePath: string): string {
     ".lock": "Lockfile",
     ".md": "Markdown",
     ".php": "PHP",
+    ".prisma": "Prisma",
     ".properties": "Properties",
     ".py": "Python",
     ".rb": "Ruby",
@@ -1092,16 +1098,44 @@ function collectDatabaseDefinitions(files: SourceFile[]): DbDefinition[] {
 
 function databaseDefinitionsFromContent(file: SourceFile): DbDefinition[] {
   const definitions: DbDefinition[] = [];
-  file.content.split(/\r?\n/).forEach((line, index) => {
+  const lines = file.content.split(/\r?\n/);
+  lines.forEach((line, index) => {
     const lineNumber = index + 1;
     const stripped = line.trim();
-    const sqlMatch = stripped.match(
-      /\b(CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+INDEX)\s+([^\s(]+)/i,
+
+    const createTableMatch = stripped.match(
+      /\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)/i,
     );
-    if (sqlMatch) {
+    if (createTableMatch) {
       definitions.push({
-        kind: sqlMatch[1].toUpperCase(),
-        name: sqlMatch[2],
+        kind: "CREATE TABLE",
+        name: cleanDbIdentifier(createTableMatch[1]),
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const alterTableMatch = stripped.match(
+      /\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?([`"[\]\w.]+)/i,
+    );
+    if (alterTableMatch) {
+      definitions.push({
+        kind: "ALTER TABLE",
+        name: cleanDbIdentifier(alterTableMatch[1]),
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const createIndexMatch = stripped.match(
+      /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)/i,
+    );
+    if (createIndexMatch) {
+      definitions.push({
+        kind: stripped.toUpperCase().includes("CREATE UNIQUE INDEX")
+          ? "CREATE UNIQUE INDEX"
+          : "CREATE INDEX",
+        name: cleanDbIdentifier(createIndexMatch[1]),
         path: file.path,
         line: String(lineNumber),
       });
@@ -1126,8 +1160,80 @@ function databaseDefinitionsFromContent(file: SourceFile): DbDefinition[] {
         line: String(lineNumber),
       });
     }
+
+    const typeOrmMatch = stripped.match(/^@(?:\w+\.)?Entity(?:\((.*)\))?/);
+    if (typeOrmMatch) {
+      const className = findNextClassName(lines, index);
+      const explicitName = typeOrmMatch[1]
+        ? typeOrmMatch[1].match(/["'`]([^"'`]+)["'`]/)?.[1]
+        : null;
+      definitions.push({
+        kind: "TypeORM entity",
+        name: explicitName || className || "(decorated entity)",
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const sqlalchemyTablenameMatch = stripped.match(
+      /^__tablename__\s*=\s*["'`]([^"'`]+)["'`]/,
+    );
+    if (sqlalchemyTablenameMatch) {
+      definitions.push({
+        kind: "SQLAlchemy table",
+        name: sqlalchemyTablenameMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const sequelizeDefineMatch = stripped.match(
+      /\b(?:sequelize|connection)\.define\(\s*["'`]([^"'`]+)["'`]/,
+    );
+    if (sequelizeDefineMatch) {
+      definitions.push({
+        kind: "Sequelize model",
+        name: sequelizeDefineMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const railsCreateTableMatch = stripped.match(/\bcreate_table\s+["']?:([\w.]+)/);
+    if (railsCreateTableMatch) {
+      definitions.push({
+        kind: "Rails create_table",
+        name: railsCreateTableMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const railsAddIndexMatch = stripped.match(/\badd_index\s+["']?:([\w.]+)/);
+    if (railsAddIndexMatch) {
+      definitions.push({
+        kind: "Rails add_index",
+        name: railsAddIndexMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
   });
   return definitions;
+}
+
+function cleanDbIdentifier(value: string): string {
+  return value.replace(/^[`"[]+/, "").replace(/[`"\]]+$/, "").replace(/[,(;]+$/, "");
+}
+
+function findNextClassName(lines: string[], decoratorIndex: number): string | null {
+  for (let index = decoratorIndex + 1; index < Math.min(lines.length, decoratorIndex + 6); index += 1) {
+    const match = lines[index].trim().match(/^(?:export\s+)?class\s+(\w+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 function routeDict(method: string, routePath: string, filePath: string, lineNumber: number): Route {
@@ -1610,6 +1716,117 @@ function isAnalysisTarget(filePath: string): boolean {
     "tsconfig.json",
   ].includes(basename)) return false;
   return true;
+}
+
+const DATABASE_FILE_NAMES = new Set([
+  "schema.prisma",
+  "database.sql",
+  "schema.sql",
+  "structure.sql",
+  "ddl.sql",
+  "models.py",
+  "entities.ts",
+  "entity.ts",
+  "models.ts",
+  "database.ts",
+  "datasource.ts",
+  "data-source.ts",
+  "alembic.ini",
+]);
+
+const DATABASE_FILE_EXTENSIONS = new Set([".sql", ".prisma"]);
+
+const DATABASE_PATH_KEYWORDS = [
+  "migration",
+  "migrations",
+  "migrate",
+  "schema",
+  "ddl",
+  "database",
+  "db",
+  "model",
+  "models",
+  "entity",
+  "entities",
+  "prisma",
+  "typeorm",
+  "sqlalchemy",
+  "sequelize",
+  "alembic",
+];
+
+function isDatabaseDefinitionPath(filePath: string): boolean {
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const segments = normalized.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(normalized);
+  return (
+    DATABASE_FILE_NAMES.has(basename) ||
+    DATABASE_FILE_EXTENSIONS.has(extension) ||
+    segments.some((segment) => DATABASE_PATH_KEYWORDS.includes(segment))
+  );
+}
+
+function databasePathScore(filePath: string): number {
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const segments = normalized.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(normalized);
+  let score = 0;
+  if (DATABASE_FILE_NAMES.has(basename)) score += 35;
+  if (DATABASE_FILE_EXTENSIONS.has(extension)) score += 30;
+  for (const keyword of DATABASE_PATH_KEYWORDS) {
+    if (segments.some((segment) => segment === keyword || segment.includes(keyword))) {
+      score += 8;
+    }
+  }
+  return score;
+}
+
+function hasDatabaseDefinitionSignal(file: SourceFile): boolean {
+  return databaseDefinitionsFromContent(file).length > 0;
+}
+
+/**
+ * CodebaseMap と生ファイルから DB・データモデル解析向けのファイルを特定する。
+ *
+ * 返却されるファイルは:
+ * 1. codebase-map.json の databaseDefinitions に出ているファイル
+ * 2. SQL/Prisma/ORM/migration らしいパスまたは内容を持つファイル
+ * 3. テストや生成物など解析対象外のファイルを除外したもの
+ */
+export function identifyDatabaseDefinitionFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 40,
+): SourceFile[] {
+  const definitionPaths = new Set(
+    codebaseMap.databaseDefinitions.map((definition) => definition.path),
+  );
+  const candidates = rawFiles.filter((file) => {
+    if (!isAnalysisTarget(file.path)) return false;
+    return (
+      definitionPaths.has(file.path) ||
+      isDatabaseDefinitionPath(file.path) ||
+      hasDatabaseDefinitionSignal(file)
+    );
+  });
+
+  const scored = candidates.map((file) => {
+    let score = 0;
+    if (definitionPaths.has(file.path)) score += 100;
+    if (hasDatabaseDefinitionSignal(file)) score += 60;
+    score += databasePathScore(file.path);
+    score += Math.min(file.content.split(/\r?\n/).length, 400) / 100;
+    return { file, score };
+  });
+
+  scored.sort((left, right) => {
+    const scoreDiff = right.score - left.score;
+    return scoreDiff !== 0 ? scoreDiff : left.file.path.localeCompare(right.file.path);
+  });
+
+  return scored.slice(0, maxFiles).map((item) => item.file);
 }
 
 /**

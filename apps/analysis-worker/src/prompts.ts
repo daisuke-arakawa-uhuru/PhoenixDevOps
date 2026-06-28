@@ -169,6 +169,54 @@ function formatTextFiles(files: Array<{ path: string; content: string }>): strin
   return blocks.length === 0 ? "入力ファイル本文はまだ取得されていません。" : blocks.join("\n\n");
 }
 
+export function buildDatabaseSchemaAnalysisPrompt(
+  payload: AnalysisTaskPayload,
+  inputs: AnalysisInput,
+  databaseDefinitionFiles: Array<{ path: string; content: string }>,
+  codebaseMapJson: string,
+): string {
+  return [
+    "[TASK: DATABASE_SCHEMA_ANALYSIS]",
+    "",
+    "あなたはレガシー Web アプリケーションの DB・データモデルを解析する専門エンジンです。",
+    "DBマイグレーション、DDL、ORM定義、モデル定義を読み取り、",
+    "テーブル構造、リレーション、インデックス、制約を抽出して「DB・データモデル仕様書」を生成します。",
+    "",
+    "## 解析対象",
+    "",
+    `- ジョブID: ${payload.jobId}`,
+    `- プロジェクト名: ${payload.projectName || "未指定"}`,
+    `- ソース: ${inputs.sourceArchiveUri}`,
+    "",
+    "## 解析の方針",
+    "",
+    "- ソースコードとDB定義ファイルを正として扱い、根拠を示せない内容は断定しないでください。",
+    "- カラム、型、制約、インデックス、外部キー、リレーションは根拠ファイルパス付きで整理してください。",
+    "- ORM定義から推測したDB物理名は「推測」と明示してください。",
+    "- 解析できない箇所は「判断不能」として明示してください。",
+    "",
+    "## 出力形式（必ず以下のMarkdown構成で出力してください）",
+    "",
+    "1. **解析対象サマリー** — 解析したDB関連ファイル数、検出したテーブル/モデル候補数",
+    "2. **ER図** — Mermaid erDiagram 形式。根拠不足の場合は判明範囲だけを出力",
+    "3. **テーブル一覧** — テーブル/モデル名、概要、主キー、主要リレーション、根拠ファイルパス",
+    "4. **データディクショナリ** — テーブルごとにカラム名、型、Nullable、Default、制約、説明、根拠",
+    "5. **リレーション一覧** — 親、子、カーディナリティ、外部キー、根拠",
+    "6. **インデックス・制約一覧** — PK、FK、Unique、Index、Check、Not Null、根拠",
+    "7. **判断不能・推測事項** — 解析できなかった項目、推測した項目、追加で必要な情報",
+    "",
+    "## STEP 1 成果物: コードベースマップ（codebase-map.json 抜粋）",
+    "",
+    "```json",
+    codebaseMapJson,
+    "```",
+    "",
+    "## DB関連ソースコード",
+    "",
+    formatTextFiles(databaseDefinitionFiles),
+  ].join("\n");
+}
+
 export function buildBusinessLogicAnalysisPrompt(
   payload: AnalysisTaskPayload,
   inputs: AnalysisInput,

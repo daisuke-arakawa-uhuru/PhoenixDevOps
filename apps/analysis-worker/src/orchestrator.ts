@@ -5,6 +5,7 @@ import {
   AnalysisEngine,
   DesignGenerator,
   BusinessLogicEngine,
+  DatabaseSchemaEngine,
   generatedArtifacts,
   ExtractionResult,
 } from "./engines.js";
@@ -53,6 +54,7 @@ export class AnalysisOrchestrator {
   private documentEngine: AnalysisEngine;
   private trueDesignGenerator: DesignGenerator;
   private driftReportGenerator: DesignGenerator;
+  private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
 
   constructor({
@@ -63,6 +65,7 @@ export class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+    databaseSchemaEngine = null,
     businessLogicEngine = null,
   }: {
     jobRepository: JobRepository;
@@ -72,6 +75,7 @@ export class AnalysisOrchestrator {
     documentEngine: AnalysisEngine;
     trueDesignGenerator: DesignGenerator;
     driftReportGenerator: DesignGenerator;
+    databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
   }) {
     this.jobRepository = jobRepository;
@@ -81,6 +85,7 @@ export class AnalysisOrchestrator {
     this.documentEngine = documentEngine;
     this.trueDesignGenerator = trueDesignGenerator;
     this.driftReportGenerator = driftReportGenerator;
+    this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
   }
 
@@ -102,6 +107,16 @@ export class AnalysisOrchestrator {
       const sourceSpecification = await this.sourceCodeEngine.extract(payload, inputs);
       const documentSpecification = await this.documentEngine.extract(payload, inputs);
 
+      // DB・データモデル解析（エンジンが設定されている場合のみ実行）
+      let databaseSchemaSpecMarkdown: string | null = null;
+      if (this.databaseSchemaEngine) {
+        databaseSchemaSpecMarkdown = await this.databaseSchemaEngine.analyze(
+          payload,
+          inputs,
+          sourceSpecification,
+        );
+      }
+
       // ビジネスロジック解析（エンジンが設定されている場合のみ実行）
       let businessLogicSpecMarkdown: string | null = null;
       if (this.businessLogicEngine) {
@@ -116,6 +131,7 @@ export class AnalysisOrchestrator {
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
         sourceSpecification.artifacts,
+        databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
       );
       const debugFiles = {
@@ -141,4 +157,3 @@ export class AnalysisOrchestrator {
     }
   }
 }
-

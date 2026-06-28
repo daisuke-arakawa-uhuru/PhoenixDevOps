@@ -142,6 +142,7 @@ npm run local -- \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
+| `database_schema_spec.md` | DB・データモデル仕様書（ER図、データディクショナリ、リレーション・制約一覧） |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
@@ -204,6 +205,22 @@ gcloud functions deploy analysis-worker \
 ```
 
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+
+## DB・データモデル解析（STEP 2-②）
+
+STEP 1 の静的解析成果物（`codebase-map.json` の `databaseDefinitions`）と、SQL / Prisma / TypeORM / SQLAlchemy / Sequelize / Rails migration などのDB関連ファイルを入力として、DB・データモデルの個別解析を行います。
+
+### 解析内容
+
+- DB定義候補ファイルを自動特定
+- Gemini API でテーブル構造、リレーション、インデックス、制約を解析・言語化
+- Mermaid形式のER図、テーブル一覧、データディクショナリ、リレーション・制約一覧を含む仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `database_schema_spec.md` | DB・データモデル仕様書（ER図、テーブル一覧、データディクショナリ、リレーション、インデックス・制約一覧、判断不能・推測事項） |
 
 ## ビジネスロジック解析（STEP 2-④）
 
