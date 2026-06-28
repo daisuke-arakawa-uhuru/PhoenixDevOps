@@ -138,6 +138,12 @@ variable "gemini_use_vertex_ai" {
   default     = true
 }
 
+variable "gemini_location" {
+  description = "Vertex AI Gemini endpoint location"
+  type        = string
+  default     = "global"
+}
+
 variable "gemini_api_key_secret_id" {
   description = "GEMINI_API_KEY として参照する Secret Manager secret ID。未指定時は環境変数を設定しない。"
   type        = string

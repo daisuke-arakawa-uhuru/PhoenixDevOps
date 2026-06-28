@@ -113,11 +113,12 @@ gcloud services enable aiplatform.googleapis.com --project=<GCP_PROJECT_ID>
 ```
 
 #### 3.4. 環境変数の設定
-`apps/analysis-worker/.env` に、`apps/analysis-worker/.env.sample` の内容を参考に以下のように書き換えてください。
+`apps/analysis-worker/.env.example` を `apps/analysis-worker/.env` にコピーし、以下のように書き換えてください。
+`npm run local` は起動時に `apps/analysis-worker/.env` を自動で読み込みます。シェルで明示した環境変数がある場合は、そちらが優先されます。
 ```env
 GEMINI_USE_VERTEX_AI=true
 GOOGLE_CLOUD_PROJECT=<GCP_PROJECT_ID>
-GOOGLE_CLOUD_LOCATION=asia-northeast1
+GOOGLE_CLOUD_LOCATION=global
 ```
 
 ※ 競合を避けるため、`GEMINI_API_KEY` がシステム環境変数にある場合は設定を外すか、`.env` で指定しないようにしてください。
@@ -141,6 +142,7 @@ npm run local -- \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
@@ -154,8 +156,8 @@ npm run local -- \
 | `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-3.1-flash-lite` |
 | `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で明示的に dry-run client を使用し、Gemini API を呼び出しません。 |
 | `GEMINI_USE_VERTEX_AI` <br/> `GOOGLE_GENAI_USE_VERTEXAI` | 任意 | `true` / `1` / `yes` で Vertex AI (ADC) 経由での呼び出しを有効にします。また、`GEMINI_API_KEY` が未指定の場合は自動的に Vertex AI (ADC) モードになります。 |
-| `GOOGLE_CLOUD_PROJECT` <br/> `GCP_PROJECT` <br/> `GEMINI_PROJECT` | 任意 | Vertex AI 使用時の Google Cloud プロジェクト ID。省略時は実行環境から自動解決されます。 |
-| `GOOGLE_CLOUD_LOCATION` <br/> `GCP_LOCATION` <br/> `GEMINI_LOCATION` | 任意 | Vertex AI 使用時のロケーション（例: `asia-northeast1`）。省略時は実行環境から自動解決されます。 |
+| `GOOGLE_CLOUD_PROJECT` <br/> `GCP_PROJECT` <br/> `GEMINI_PROJECT` | 条件付き | Vertex AI 使用時の Google Cloud プロジェクト ID。 |
+| `GOOGLE_CLOUD_LOCATION` <br/> `GCP_LOCATION` <br/> `GEMINI_LOCATION` | 条件付き | Vertex AI 使用時の endpoint location。デフォルト例: `global`。 |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | ジョブ状態を保存する Firestore コレクション。デフォルト: `jobs` |
 | `RESULTS_BUCKET` | 任意 | 成果物保存先 bucket。未指定時は source archive と同じ bucket を使います。 |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | 成果物 prefix。デフォルト: `results/{job_id}` |
@@ -198,7 +200,23 @@ gcloud functions deploy analysis-worker \
   --source apps/analysis-worker \
   --entry-point runAnalysisWorker \
   --trigger-http \
-  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false,GEMINI_USE_VERTEX_AI=true
+  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false,GEMINI_USE_VERTEX_AI=true,GEMINI_LOCATION=global
 ```
 
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+
+## ビジネスロジック解析（STEP 2-④）
+
+STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`）を入力として、ビジネスロジック・ユースケースの個別解析を行います。
+
+### 解析内容
+
+- サービス層、ドメインモデル、ユースケースのコードからビジネスロジックファイルを自動特定
+- Gemini API でビジネスフロー、条件分岐、状態遷移を解析・言語化
+- 機能一覧、ユースケースシナリオ、Mermaid形式のシーケンス図・状態遷移図を含む仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |

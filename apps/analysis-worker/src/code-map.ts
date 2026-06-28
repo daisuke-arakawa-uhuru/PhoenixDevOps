@@ -1611,3 +1611,184 @@ function isAnalysisTarget(filePath: string): boolean {
   ].includes(basename)) return false;
   return true;
 }
+
+/**
+ * ビジネスロジック関連キーワード。パス内にこれらが含まれるファイルを優先する。
+ */
+const BUSINESS_LOGIC_PATH_KEYWORDS = [
+  "service",
+  "domain",
+  "model",
+  "usecase",
+  "use-case",
+  "use_case",
+  "entity",
+  "handler",
+  "controller",
+  "resolver",
+  "command",
+  "query",
+  "saga",
+  "workflow",
+  "state",
+  "rule",
+  "policy",
+  "validator",
+  "interactor",
+  "aggregate",
+  "repository",
+  "logic",
+  "action",
+  "middleware",
+  "guard",
+  "pipe",
+  "strategy",
+];
+
+/**
+ * ビジネスロジック解析で除外するパスパターン。
+ */
+const BUSINESS_LOGIC_EXCLUDE_PATTERNS = [
+  "/node_modules/",
+  "/dist/",
+  "/build/",
+  "/.next/",
+  "/coverage/",
+  "/test/",
+  "/tests/",
+  "/__tests__/",
+  "/spec/",
+  "/e2e/",
+  "/fixtures/",
+  "/mocks/",
+  "/.storybook/",
+  "/storybook/",
+  "/stories/",
+  "/playwright/",
+  "/cypress/",
+  "/styles/",
+  "/assets/",
+  "/images/",
+  "/fonts/",
+  "/public/",
+  "/static/",
+  "/infra/",
+  "/terraform/",
+  "/cdk/",
+  "/cloudformation/",
+  "/.github/",
+  "/.vscode/",
+  "/generated/",
+  "/__generated__/",
+];
+
+/**
+ * UI層として除外するパスパターン。ビジネスロジック解析では優先度を下げる。
+ */
+const UI_LAYER_PATTERNS = [
+  "/components/",
+  "/pages/",
+  "/views/",
+  "/layouts/",
+  "/screens/",
+  "/templates/",
+  "/partials/",
+  "/widgets/",
+];
+
+/**
+ * CodebaseMap と生ファイルからビジネスロジック関連のファイルを特定し、
+ * 優先順位付けして返す。
+ *
+ * 返却されるファイルは:
+ * 1. ビジネスロジックキーワードを含むパスのファイル（高優先）
+ * 2. ソースコード拡張子を持ち、除外パターンに該当しないファイル（低優先）
+ *
+ * UI層ファイルは優先度を下げるが完全に除外はしない。
+ */
+export function identifyBusinessLogicFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 60,
+): SourceFile[] {
+  // 除外対象フィルタ
+  const isExcluded = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return BUSINESS_LOGIC_EXCLUDE_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // UI層判定
+  const isUiLayer = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return UI_LAYER_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // ビジネスロジックキーワードマッチ
+  const businessLogicScore = (filePath: string): number => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    const segments = normalized.split("/");
+    let score = 0;
+    for (const keyword of BUSINESS_LOGIC_PATH_KEYWORDS) {
+      if (segments.some((seg) => seg.includes(keyword))) {
+        score += 10;
+      }
+    }
+    // ファイル名自体にキーワードが含まれる場合はボーナス
+    const basename = segments.at(-1) ?? "";
+    for (const keyword of BUSINESS_LOGIC_PATH_KEYWORDS) {
+      if (basename.includes(keyword)) {
+        score += 5;
+      }
+    }
+    return score;
+  };
+
+  // ソースコードファイルかどうか
+  const isSourceCode = (filePath: string): boolean => {
+    const ext = path.extname(filePath).toLowerCase();
+    return SOURCE_EXTENSIONS.has(ext);
+  };
+
+  // フィルタリング
+  const candidates = rawFiles.filter((file) => {
+    if (!isSourceCode(file.path)) return false;
+    if (isExcluded(file.path)) return false;
+    if (isTestFile(file.path)) return false;
+    return true;
+  });
+
+  // スコアリングとソート
+  const scored = candidates.map((file) => {
+    let score = businessLogicScore(file.path);
+    if (isUiLayer(file.path)) {
+      score -= 20; // UI層は優先度を下げる
+    }
+    // ファイルサイズ（行数）が多いほうが重要なロジックが含まれる可能性
+    const lines = file.content.split("\n").length;
+    if (lines > 50) score += 2;
+    if (lines > 200) score += 3;
+    return { file, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxFiles).map((s) => s.file);
+}
+
+/**
+ * exported-symbols-*.md の内容を集約して1つのサマリー文字列を生成する。
+ */
+export function collectExportedSymbolsSummary(
+  artifacts: Record<string, string>,
+): string {
+  const symbolFiles = Object.entries(artifacts)
+    .filter(([name]) => name.startsWith("exported-symbols-"))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (symbolFiles.length === 0) {
+    return "エクスポートシンボル情報は利用できません。";
+  }
+
+  return symbolFiles
+    .map(([name, content]) => `### ${name}\n\n${content}`)
+    .join("\n\n---\n\n");
+}

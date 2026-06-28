@@ -93,9 +93,12 @@ terraform plan
 # apply は原則 CI（master マージ）で実行する
 ```
 
-### 解析ワーカーの secret 設定
+### 解析ワーカーの Gemini 設定
 
-Gemini API キーの実値は Terraform 変数や `*.tfvars` に書かず、Secret Manager で管理します。
+解析ワーカーは既定で Vertex AI (ADC) 経由で Gemini を呼び出します。Gemini endpoint location は
+Cloud Functions の配置リージョンとは別に `analysis_worker_gemini_location` で指定し、既定値は `global` です。
+
+API キー方式を使う場合、Gemini API キーの実値は Terraform 変数や `*.tfvars` に書かず、Secret Manager で管理します。
 Terraform には secret ID のみを渡します。
 
 ```hcl
@@ -104,11 +107,8 @@ gemini_api_key_secret_version = "latest"
 ```
 
 GitHub Actions の plan/apply は、Repository / Environment Variables の `GEMINI_API_KEY_SECRET_ID` /
-`GEMINI_API_KEY_SECRET_VERSION` を Terraform 変数として渡します。未設定時は `gemini-api-key` / `latest` を使用します。
-
-未指定の場合、Cloud Functions には `GEMINI_API_KEY` が設定されず、`GEMINI_DRY_RUN=false` の解析ワーカーは
-起動時に Gemini API キー未設定として失敗します。ローカル疎通確認などで Gemini API を呼び出さない場合のみ
-`analysis_worker_gemini_dry_run = true` を明示してください。
+`GEMINI_API_KEY_SECRET_VERSION` を Terraform 変数として渡します。Vertex AI 使用時は API キー secret は不要です。
+ローカル疎通確認などで Gemini API を呼び出さない場合のみ `analysis_worker_gemini_dry_run = true` を明示してください。
 
 API 側が Cloud Tasks の HTTP target を作成する際は、Terraform output の
 `analysis_worker_function_uri` を URL に、`analysis_task_invoker_service_account_email` を OIDC token の

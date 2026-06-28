@@ -6,6 +6,7 @@
   "description": "Cloud Tasks triggered analysis worker for PhoenixDevOps.",
   "main": "dist/src/index.js",
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc",
     "gcp-build": "npm run build",
     "start": "functions-framework --target=runAnalysisWorker",

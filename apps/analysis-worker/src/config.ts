@@ -49,6 +49,8 @@ export class WorkerConfig {
       useVertexAi = ["1", "true", "yes"].includes(String(env.GOOGLE_GENAI_USE_VERTEXAI).toLowerCase());
     }
 
+    const location = env.GOOGLE_CLOUD_LOCATION || env.GCP_LOCATION || env.GEMINI_LOCATION || (useVertexAi ? "global" : null);
+
     return new WorkerConfig({
       firestoreJobsCollection: env.FIRESTORE_JOBS_COLLECTION || "jobs",
       resultsBucket: env.RESULTS_BUCKET || null,
@@ -58,7 +60,7 @@ export class WorkerConfig {
       geminiDryRun: ["1", "true", "yes"].includes(String(env.GEMINI_DRY_RUN || "").toLowerCase()),
       geminiUseVertexAi: useVertexAi,
       geminiProject: env.GOOGLE_CLOUD_PROJECT || env.GCP_PROJECT || env.GEMINI_PROJECT || null,
-      geminiLocation: env.GOOGLE_CLOUD_LOCATION || env.GCP_LOCATION || env.GEMINI_LOCATION || null,
+      geminiLocation: location,
     });
   }
 }

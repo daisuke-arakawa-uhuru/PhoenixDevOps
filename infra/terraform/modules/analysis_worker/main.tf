@@ -160,7 +160,7 @@ resource "google_cloudfunctions2_function" "worker" {
       GEMINI_DRY_RUN            = tostring(var.gemini_dry_run)
       GEMINI_USE_VERTEX_AI      = tostring(var.gemini_use_vertex_ai)
       GEMINI_PROJECT            = var.project_id
-      GEMINI_LOCATION           = var.location
+      GEMINI_LOCATION           = var.gemini_location
     }
 
     dynamic "secret_environment_variables" {
