@@ -4,6 +4,7 @@ import { InputLoader } from "./storage.js";
 import {
   AnalysisEngine,
   DesignGenerator,
+  BusinessLogicEngine,
   generatedArtifacts,
   ExtractionResult,
 } from "./engines.js";
@@ -52,6 +53,7 @@ export class AnalysisOrchestrator {
   private documentEngine: AnalysisEngine;
   private trueDesignGenerator: DesignGenerator;
   private driftReportGenerator: DesignGenerator;
+  private businessLogicEngine: BusinessLogicEngine | null;
 
   constructor({
     jobRepository,
@@ -61,6 +63,7 @@ export class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+    businessLogicEngine = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -69,6 +72,7 @@ export class AnalysisOrchestrator {
     documentEngine: AnalysisEngine;
     trueDesignGenerator: DesignGenerator;
     driftReportGenerator: DesignGenerator;
+    businessLogicEngine?: BusinessLogicEngine | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -77,6 +81,7 @@ export class AnalysisOrchestrator {
     this.documentEngine = documentEngine;
     this.trueDesignGenerator = trueDesignGenerator;
     this.driftReportGenerator = driftReportGenerator;
+    this.businessLogicEngine = businessLogicEngine;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -96,10 +101,22 @@ export class AnalysisOrchestrator {
       const inputs = await this.inputLoader.load(payload);
       const sourceSpecification = await this.sourceCodeEngine.extract(payload, inputs);
       const documentSpecification = await this.documentEngine.extract(payload, inputs);
+
+      // ビジネスロジック解析（エンジンが設定されている場合のみ実行）
+      let businessLogicSpecMarkdown: string | null = null;
+      if (this.businessLogicEngine) {
+        businessLogicSpecMarkdown = await this.businessLogicEngine.analyze(
+          payload,
+          inputs,
+          sourceSpecification,
+        );
+      }
+
       const artifacts = generatedArtifacts(
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
         sourceSpecification.artifacts,
+        businessLogicSpecMarkdown,
       );
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
@@ -124,3 +141,4 @@ export class AnalysisOrchestrator {
     }
   }
 }
+

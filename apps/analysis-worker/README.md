@@ -70,19 +70,69 @@ npm test
 
 ## ローカル実行
 
-依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。dry-run を明示した場合のみ `GEMINI_API_KEY` は不要です。
+依存関係をインストールすると、Functions Framework や Gemini / Google Cloud SDK を含めたローカル実行ができます。
+
+### 1. 依存関係のインストール
 
 ```bash
 cd apps/analysis-worker
 npm install
+```
 
-node src/local-runner.js \
-  --source "/path/to/input/CustomerServiceManagement.zip" \
-  --document "/path/to/input/architecture_design.pdf" \
+### 2. APIキー（Google AI Studio）を使用するローカル実行
+
+`dry-run` を明示した場合のみ `GEMINI_API_KEY` は不要です。
+
+```bash
+npm run local -- \
+  --source "../../sample/CustomerServiceManagement/src.zip" \
+  --document "../../sample/CustomerServiceManagement/doc.pdf" \
   --project-name "MyProject" \
   --job-id "local-test-01" \
   --dry-run
 ```
+
+### 3. ADC（Vertex AI）を使用するローカル実行
+
+APIキーの代わりに Google Cloud の Application Default Credentials (ADC) を使って Vertex AI 経由で Gemini を動かす手順です。
+
+#### 3.1. Google Cloud CLI (gcloud) のパス設定
+Windows の場合、gcloud は通常以下の場所にインストールされます。パスが通っていない場合は環境変数 PATH に追加してください。
+- `%USERPROFILE%\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin`
+
+#### 3.2. ADC認証のセットアップ
+以下のコマンドを実行し、ブラウザで Google アカウントにサインインして認証情報を取得します。
+```bash
+gcloud auth application-default login
+```
+
+#### 3.3. Vertex AI API の有効化
+対象の Google Cloud プロジェクトで Vertex AI API を有効にします。
+```bash
+gcloud services enable aiplatform.googleapis.com --project=<GCP_PROJECT_ID>
+```
+
+#### 3.4. 環境変数の設定
+`apps/analysis-worker/.env.example` を `apps/analysis-worker/.env` にコピーし、以下のように書き換えてください。
+`npm run local` は起動時に `apps/analysis-worker/.env` を自動で読み込みます。シェルで明示した環境変数がある場合は、そちらが優先されます。
+```env
+GEMINI_USE_VERTEX_AI=true
+GOOGLE_CLOUD_PROJECT=<GCP_PROJECT_ID>
+GOOGLE_CLOUD_LOCATION=global
+```
+
+※ 競合を避けるため、`GEMINI_API_KEY` がシステム環境変数にある場合は設定を外すか、`.env` で指定しないようにしてください。
+
+#### 3.5. 実行
+`--dry-run` を指定せずに実行します。
+```bash
+npm run local -- \
+  --source "../../sample/CustomerServiceManagement/src.zip" \
+  --document "../../sample/CustomerServiceManagement/doc.pdf" \
+  --project-name "CustomerServiceManagement"
+```
+
+### 4. 出力成果物
 
 出力先はデフォルトで `output/{job_id}/` です。変更する場合は `--output` を指定してください。
 
@@ -92,6 +142,7 @@ node src/local-runner.js \
 | --- | --- |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
@@ -101,9 +152,12 @@ node src/local-runner.js \
 
 | 変数名 | 必須 | 説明 |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | 条件付き | Gemini API のキー。`GEMINI_DRY_RUN` が未指定または `false` の場合は必須です。 |
+| `GEMINI_API_KEY` | 条件付き | Gemini API のキー。Vertex AI (ADC) を使用しない場合かつ `GEMINI_DRY_RUN` が未指定または `false` の場合は必須です。 |
 | `GEMINI_MODEL` | 任意 | 使用するモデル。デフォルト: `gemini-3.1-flash-lite` |
 | `GEMINI_DRY_RUN` | 任意 | `true` / `1` / `yes` で明示的に dry-run client を使用し、Gemini API を呼び出しません。 |
+| `GEMINI_USE_VERTEX_AI` <br/> `GOOGLE_GENAI_USE_VERTEXAI` | 任意 | `true` / `1` / `yes` で Vertex AI (ADC) 経由での呼び出しを有効にします。また、`GEMINI_API_KEY` が未指定の場合は自動的に Vertex AI (ADC) モードになります。 |
+| `GOOGLE_CLOUD_PROJECT` <br/> `GCP_PROJECT` <br/> `GEMINI_PROJECT` | 条件付き | Vertex AI 使用時の Google Cloud プロジェクト ID。 |
+| `GOOGLE_CLOUD_LOCATION` <br/> `GCP_LOCATION` <br/> `GEMINI_LOCATION` | 条件付き | Vertex AI 使用時の endpoint location。デフォルト例: `global`。 |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | ジョブ状態を保存する Firestore コレクション。デフォルト: `jobs` |
 | `RESULTS_BUCKET` | 任意 | 成果物保存先 bucket。未指定時は source archive と同じ bucket を使います。 |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | 成果物 prefix。デフォルト: `results/{job_id}` |
@@ -121,8 +175,9 @@ Gemini API quota がありません。Google AI Studio の Billing / Rate limits
 ## Cloud Functions デプロイ例
 
 Terraform では [infra/terraform/modules/analysis_worker](../../infra/terraform/modules/analysis_worker) が
-この構成を管理します。手動デプロイで動作確認する場合の同等コマンドは以下です。
+この構成を管理します。
 
+### 1. API キーを使用する場合のデプロイ例
 ```bash
 gcloud functions deploy analysis-worker \
   --gen2 \
@@ -135,4 +190,33 @@ gcloud functions deploy analysis-worker \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest
 ```
 
+### 2. ADC (Vertex AI) を使用する場合のデプロイ例
+サービスアカウントに **Vertex AI ユーザー**（`roles/aiplatform.user`）ロールを付与した上で、以下のようにシークレットキーを設定せずにデプロイします。
+```bash
+gcloud functions deploy analysis-worker \
+  --gen2 \
+  --runtime nodejs24 \
+  --region asia-northeast1 \
+  --source apps/analysis-worker \
+  --entry-point runAnalysisWorker \
+  --trigger-http \
+  --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false,GEMINI_USE_VERTEX_AI=true,GEMINI_LOCATION=global
+```
+
 現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+
+## ビジネスロジック解析（STEP 2-④）
+
+STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`）を入力として、ビジネスロジック・ユースケースの個別解析を行います。
+
+### 解析内容
+
+- サービス層、ドメインモデル、ユースケースのコードからビジネスロジックファイルを自動特定
+- Gemini API でビジネスフロー、条件分岐、状態遷移を解析・言語化
+- 機能一覧、ユースケースシナリオ、Mermaid形式のシーケンス図・状態遷移図を含む仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |

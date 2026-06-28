@@ -15,14 +15,38 @@ test("buildGeminiClient uses dry-run client only when explicitly enabled", () =>
   assert.ok(client instanceof DryRunGeminiClient);
 });
 
-test("buildGeminiClient requires GEMINI_API_KEY when dry-run is disabled", () => {
-  assert.throws(() => buildGeminiClient(new GeminiSettings({ dryRun: false })), {
+test("buildGeminiClient uses Vertex AI client when project and location are configured", () => {
+  const client = buildGeminiClient(
+    new GeminiSettings({
+      apiKey: null,
+      dryRun: false,
+      project: "test-project",
+      location: "asia-northeast1",
+    }),
+  );
+
+  assert.ok(client instanceof GoogleGenAIClient);
+});
+
+test("buildGeminiClient requires project and location when Vertex AI is enabled", () => {
+  assert.throws(() => buildGeminiClient(new GeminiSettings({ apiKey: null, dryRun: false })), {
+    message: "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required when Vertex AI is enabled",
+  });
+});
+
+test("GeminiSettings defaults useVertexAi to true", () => {
+  const settings = new GeminiSettings();
+  assert.strictEqual(settings.useVertexAi, true);
+});
+
+test("buildGeminiClient requires GEMINI_API_KEY when dry-run is disabled and Vertex AI is disabled", () => {
+  assert.throws(() => buildGeminiClient(new GeminiSettings({ dryRun: false, useVertexAi: false })), {
     message: "GEMINI_API_KEY is required when dry-run is disabled",
   });
 });
 
 test("buildGeminiClient uses Google GenAI client when API key is configured", () => {
-  const client = buildGeminiClient(new GeminiSettings({ apiKey: "test-key", dryRun: false }));
+  const client = buildGeminiClient(new GeminiSettings({ apiKey: "test-key", dryRun: false, useVertexAi: false }));
 
   assert.ok(client instanceof GoogleGenAIClient);
 });

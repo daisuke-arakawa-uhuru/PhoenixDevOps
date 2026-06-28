@@ -5,12 +5,16 @@ import {
   buildCodebaseMap,
   codebaseMapArtifacts,
   renderSourceOverviewMarkdown,
+  identifyBusinessLogicFiles,
+  collectExportedSymbolsSummary,
+  CodebaseMap,
 } from "./code-map.js";
 import {
   buildDocumentExtractionPrompt,
   buildDriftReportPrompt,
   buildSourceAnalysisPrompt,
   buildTrueDesignPrompt,
+  buildBusinessLogicAnalysisPrompt,
 } from "./prompts.js";
 
 export interface ExtractionResult extends SpecificationResult {
@@ -192,21 +196,106 @@ export class GeminiDriftReportGenerator implements DesignGenerator {
   }
 }
 
+export interface BusinessLogicEngine {
+  analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string>;
+}
+
+export class GeminiBusinessLogicAnalysisEngine implements BusinessLogicEngine {
+  constructor(private geminiClient: GeminiClient) {}
+
+  async analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string> {
+    const analysisFiles =
+      inputs.allSourceFiles && inputs.allSourceFiles.length > 0
+        ? inputs.allSourceFiles
+        : inputs.sourceFiles;
+
+    // STEP 1 成果物: CodebaseMap を取得
+    const codebaseMap: CodebaseMap = sourceSpecification.extractedItems
+      .static_overview as CodebaseMap;
+
+    // ビジネスロジック関連ファイルを特定
+    const businessLogicFiles = identifyBusinessLogicFiles(
+      codebaseMap,
+      analysisFiles,
+      15,
+    );
+
+    // STEP 1 成果物: exported-symbols 情報を集約
+    const exportedSymbolsSummary = collectExportedSymbolsSummary(
+      sourceSpecification.artifacts ?? {},
+    );
+
+    // CodebaseMap の JSON サマリー（トークン制限のため軽量化）
+    const codebaseMapJson = JSON.stringify(
+      {
+        summary: codebaseMap.summary,
+        apiRoutes: codebaseMap.apiRoutes,
+        databaseDefinitions: codebaseMap.databaseDefinitions,
+        configFiles: codebaseMap.configFiles,
+      },
+      null,
+      2,
+    );
+
+    const prompt = buildBusinessLogicAnalysisPrompt(
+      payload,
+      inputs,
+      businessLogicFiles,
+      codebaseMapJson,
+      exportedSymbolsSummary,
+    );
+
+    return this.geminiClient.generate(prompt);
+  }
+}
+
+export class PlaceholderBusinessLogicEngine implements BusinessLogicEngine {
+  async analyze(): Promise<string> {
+    return [
+      "# ビジネスロジック仕様書",
+      "",
+      "この成果物はプレースホルダーです。",
+      "Gemini API によるビジネスロジック解析はまだ実行されていません。",
+      "",
+      "## 機能一覧",
+      "",
+      "| 機能名 | 概要 | 根拠ファイル |",
+      "| --- | --- | --- |",
+      "| (未解析) | - | - |",
+      "",
+    ].join("\n");
+  }
+}
+
 export function generatedArtifacts(
   trueDesignMarkdown: string,
   driftReportMarkdown: string,
   extraFiles: Record<string, string> = {},
+  businessLogicSpecMarkdown: string | null = null,
 ) {
   return {
     trueDesignMarkdown,
     driftReportMarkdown,
+    businessLogicSpecMarkdown,
     extraFiles: { ...extraFiles },
     asFiles() {
-      return {
+      const files: Record<string, string> = {
         "true-design.md": this.trueDesignMarkdown,
         "document-drift-report.md": this.driftReportMarkdown,
         ...this.extraFiles,
       };
+      if (this.businessLogicSpecMarkdown) {
+        files["business_logic_spec.md"] = this.businessLogicSpecMarkdown;
+      }
+      return files;
     },
   };
 }
