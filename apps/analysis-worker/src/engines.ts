@@ -225,6 +225,7 @@ export class GeminiBusinessLogicAnalysisEngine implements BusinessLogicEngine {
     const businessLogicFiles = identifyBusinessLogicFiles(
       codebaseMap,
       analysisFiles,
+      15,
     );
 
     // STEP 1 成果物: exported-symbols 情報を集約
