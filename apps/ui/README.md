@@ -47,6 +47,9 @@ Cloud Functions から動的に配信され、
 Cloud Functions のトリガー URL（`...cloudfunctions.net/<function-name>`）から開いた場合は、
 UI 関数が静的 asset と `config.js` の参照先を関数配下へ補正します。
 
+解析を開始したジョブはブラウザの `localStorage` に保存され、ページを再読み込みしても
+`GET /jobs/{jobId}` と `GET /jobs/{jobId}/results` から状態と成果物を復元します。
+
 ## 🧪 モック検証モード（API不要での確認）
 
 実際のバックエンドAPIサーバー（Cloud Functions）が起動していない状態でUIの挙動やデザインを確認する場合は、**モックモード**を明示的に有効化します。
