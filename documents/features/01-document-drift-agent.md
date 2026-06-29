@@ -147,6 +147,7 @@ STEP 1 の静的解析結果として、後続の専門エージェントがコ�
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
 | `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
 | `database_schema_spec.md` | DB定義コードから生成したER図、データディクショナリ、リレーション・制約一覧 |
+| `single-source-of-truth.md` | インフラ/API/DB/ビジネスロジック解析結果を統合したシステム全体のSSOT仕様書 |
 
 ## 7. 判断ルール
 
@@ -317,7 +318,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 ### 11.4. Gemini 生成フェーズ
 
-現行ワーカーは、同一の Gemini client を使って次の6段階の prompt を実行する。
+現行ワーカーは、同一の Gemini client を使って次の7段階の prompt を実行する。
 
 | フェーズ | TASK | 役割 |
 | --- | --- | --- |
@@ -325,6 +326,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ドキュメント抽出 | `DOCUMENT_EXTRACTION` | 既存ドキュメント本文から仕様記述と根拠ドキュメントを抽出する |
 | DB・データモデル解析 | `DATABASE_SCHEMA_ANALYSIS` | DB定義コードからER図、データディクショナリ、リレーション・制約一覧を生成する |
 | ビジネスロジック解析 | `BUSINESS_LOGIC_ANALYSIS` | サービス層、ドメインモデル、ユースケースから業務フローと状態遷移を生成する |
+| SSOT合成 | `SSOT_SYNTHESIS` | インフラ/API/DB/ビジネスロジックの個別解析結果を統合し、コンポーネント図とデータフロー図を含むシステム全体仕様を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
 
@@ -336,6 +338,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 | 成果物 | 保存名 | 種別 |
 | --- | --- | --- |
+| システム全体SSOT仕様書 | `single-source-of-truth.md` | Gemini 生成 |
 | 真の設計書 | `true-design.md` | Gemini 生成 |
 | ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
 | DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |

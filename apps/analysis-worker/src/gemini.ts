@@ -203,6 +203,78 @@ export class DryRunGeminiClient implements GeminiClient {
         truncate(documentSummary, 2500),
       ].join("\n");
     }
+    if (prompt.includes("[TASK: SSOT_SYNTHESIS]")) {
+      const infrastructureSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: インフラ/IaC",
+        "## 個別解析結果: API/インターフェース",
+      );
+      const apiSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: API/インターフェース",
+        "## 個別解析結果: DB・データモデル",
+      );
+      const databaseSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: DB・データモデル",
+        "## 個別解析結果: ビジネスロジック・ユースケース",
+      );
+      const businessLogicSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: ビジネスロジック・ユースケース",
+        "## ソースコード解析結果（補助根拠）",
+      );
+      return [
+        "# Single Source of Truth（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、SSOT合成フェーズの接続だけを確認しています。",
+        "",
+        "## システムコンポーネント図",
+        "",
+        "```mermaid",
+        "flowchart LR",
+        "    Client[Client] --> API[API]",
+        "    API --> Logic[Business Logic]",
+        "    Logic --> DB[(Database)]",
+        "    API --> Infra[Runtime Infrastructure]",
+        "```",
+        "",
+        "## データフロー図",
+        "",
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant User as ユーザー",
+        "    participant API as API",
+        "    participant Logic as ビジネスロジック",
+        "    participant DB as DB",
+        "    User->>API: (dry-run) リクエスト",
+        "    API->>Logic: 入力検証とユースケース呼び出し",
+        "    Logic->>DB: 参照/更新",
+        "    DB-->>Logic: 結果",
+        "    Logic-->>API: レスポンス生成",
+        "    API-->>User: (dry-run) レスポンス",
+        "```",
+        "",
+        "## 入力サマリー",
+        "",
+        "### インフラ/IaC",
+        "",
+        truncate(infrastructureSpec, 1200),
+        "",
+        "### API/インターフェース",
+        "",
+        truncate(apiSpec, 1200),
+        "",
+        "### DB・データモデル",
+        "",
+        truncate(databaseSpec, 1200),
+        "",
+        "### ビジネスロジック",
+        "",
+        truncate(businessLogicSpec, 1200),
+      ].join("\n");
+    }
     if (prompt.includes("[TASK: DATABASE_SCHEMA_ANALYSIS]")) {
       const codebaseMapSection = extractPromptSection(
         prompt,

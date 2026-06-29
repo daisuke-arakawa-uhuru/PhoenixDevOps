@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getJobResults, fetchFileContent, type Artifact } from '../utils/api';
-import { FileText, AlertTriangle, Download, RefreshCw, Loader2 } from 'lucide-react';
+import { FileText, AlertTriangle, Download, RefreshCw, Loader2, Network } from 'lucide-react';
 
 interface ResultViewerProps {
   jobId: string;
@@ -10,13 +10,37 @@ interface ResultViewerProps {
   onReset: () => void;
 }
 
+type ResultTabId = 'ssot' | 'spec' | 'report';
+
+const RESULT_TABS = [
+  {
+    id: 'ssot',
+    fileName: 'single-source-of-truth.md',
+    label: 'SSOT仕様書',
+    icon: Network,
+  },
+  {
+    id: 'spec',
+    fileName: 'true-design.md',
+    label: '真の設計書',
+    icon: FileText,
+  },
+  {
+    id: 'report',
+    fileName: 'document-drift-report.md',
+    label: 'ドキュメント差分レポート',
+    icon: AlertTriangle,
+  },
+] as const;
+
 export default function ResultViewer({ jobId, projectName, onReset }: ResultViewerProps) {
-  const [activeTab, setActiveTab] = useState<'spec' | 'report'>('spec');
+  const [activeTab, setActiveTab] = useState<ResultTabId>('ssot');
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingContent, setIsFetchingContent] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const availableTabs = RESULT_TABS.filter((tab) => artifacts.some((artifact) => artifact.name === tab.fileName));
 
   // Load artifact links
   useEffect(() => {
@@ -43,12 +67,17 @@ export default function ResultViewer({ jobId, projectName, onReset }: ResultView
       try {
         setIsFetchingContent(true);
         setErrorMsg(null);
-        
-        // Find matching artifact
-        const fileName = activeTab === 'spec' ? 'true-design.md' : 'document-drift-report.md';
+
+        const tab = RESULT_TABS.find((item) => item.id === activeTab) ?? RESULT_TABS[0];
+        const fileName = tab.fileName;
         const artifact = artifacts.find(a => a.name === fileName);
         
         if (!artifact) {
+          const fallbackTab = RESULT_TABS.find((item) => artifacts.some((a) => a.name === item.fileName));
+          if (fallbackTab && fallbackTab.id !== activeTab) {
+            setActiveTab(fallbackTab.id);
+            return;
+          }
           throw new Error(`成果物ファイルが見つかりません: ${fileName}`);
         }
 
@@ -73,7 +102,7 @@ export default function ResultViewer({ jobId, projectName, onReset }: ResultView
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     
-    const defaultFilename = activeTab === 'spec' ? 'true-design.md' : 'document-drift-report.md';
+    const defaultFilename = (RESULT_TABS.find((tab) => tab.id === activeTab) ?? RESULT_TABS[0]).fileName;
     link.href = url;
     link.setAttribute('download', `${projectName ? projectName.replace(/\s+/g, '_') + '_' : ''}${defaultFilename}`);
     
@@ -98,22 +127,20 @@ export default function ResultViewer({ jobId, projectName, onReset }: ResultView
       <div className="results-action-bar">
         {/* Navigation Tabs */}
         <div className="tabs-container" id="results-tabs">
-          <button
-            className={`tab-btn ${activeTab === 'spec' ? 'active' : ''}`}
-            onClick={() => setActiveTab('spec')}
-            id="tab-btn-spec"
-          >
-            <FileText size={16} />
-            <span>真の設計書 (true-design)</span>
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'report' ? 'active' : ''}`}
-            onClick={() => setActiveTab('report')}
-            id="tab-btn-report"
-          >
-            <AlertTriangle size={16} />
-            <span>ドキュメント差分レポート</span>
-          </button>
+          {availableTabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+                id={`tab-btn-${tab.id}`}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Action Button Group */}

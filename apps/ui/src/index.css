@@ -508,6 +508,7 @@ body {
 /* Custom Tabs */
 .tabs-container {
   display: flex;
+  flex-wrap: wrap;
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 8px;

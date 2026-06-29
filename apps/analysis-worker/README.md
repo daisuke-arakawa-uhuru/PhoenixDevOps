@@ -9,7 +9,7 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 - `src/repositories.js`: Firestore のジョブ状態管理境界
 - `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
-- `src/engines.js`: F-02/F-03/F-04/F-05 の解析・生成フェーズ境界
+- `src/engines.js`: F-02/F-03/F-04/F-05 と SSOT 合成の解析・生成フェーズ境界
 - `src/code-map.js`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
 - `src/prompts.js`: Gemini に渡す prompt 生成
 - `src/local-runner.js`: ローカル実行用 CLI
@@ -140,6 +140,7 @@ npm run local -- \
 
 | ファイル | 内容 |
 | --- | --- |
+| `single-source-of-truth.md` | インフラ/API/DB/ビジネスロジック個別解析を統合したシステム全体の真実の仕様書 |
 | `true-design.md` | ソースコード由来の情報を正とした真の設計書 |
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
 | `database_schema_spec.md` | DB・データモデル仕様書（ER図、データディクショナリ、リレーション・制約一覧） |
@@ -237,3 +238,20 @@ STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`�
 | ファイル | 内容 |
 | --- | --- |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |
+
+## SSOT合成（STEP 3）
+
+STEP 2 の個別解析成果物と STEP 1 の静的解析成果物を入力として、システム全体の Single Source of Truth を合成します。
+
+### 解析内容
+
+- インフラ/IaC、API、DB、ビジネスロジックの個別仕様を接着
+- エンドポイントからユースケース、DB参照/更新、非同期処理、実行基盤までのデータフローを言語化
+- Mermaid形式のシステムコンポーネント図とデータフロー図を生成
+- 個別仕様の不足や矛盾は「判断不能・推測事項」として明示
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `single-source-of-truth.md` | 統合仕様書（システム全体像、コンポーネント図、データフロー図、エンドポイント別データフロー、インフラ対応、横断仕様） |

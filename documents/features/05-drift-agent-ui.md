@@ -75,7 +75,7 @@ stateDiagram-v2
 
 #### ③ 結果表示・ダウンロード画面（`ResultViewer`）
 * **タブ切り替えスイッチ**:
-  * 「真の設計書 (`true-design.md`)」と「ドキュメント差分レポート (`document-drift-report.md`)」の2枚のタブ。
+  * 「SSOT仕様書 (`single-source-of-truth.md`)」「真の設計書 (`true-design.md`)」「ドキュメント差分レポート (`document-drift-report.md`)」のタブ。
 * **Markdownプレビューエリア**:
   * MarkdownをHTMLに変換し、スタイルを適用して表示する。
   * テーブル（表）は線や背景色を整え、コードブロックはシンタックスハイライト風の等幅フォントスタイルを適用する。
@@ -152,6 +152,7 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
     "jobId": "job-123",
     "status": "succeeded",
     "artifactPaths": {
+      "single-source-of-truth.md": "gs://...",
       "true-design.md": "gs://...",
       "document-drift-report.md": "gs://..."
     }
@@ -177,6 +178,11 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
     "status": "succeeded",
     "expiresIn": 3600,
     "artifacts": [
+      {
+        "name": "single-source-of-truth.md",
+        "uri": "gs://...",
+        "url": "https://storage.googleapis.com/... (signed URL)"
+      },
       {
         "name": "true-design.md",
         "uri": "gs://...",

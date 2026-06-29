@@ -12,6 +12,13 @@ export interface SpecificationResult {
   summary: string;
 }
 
+export interface SynthesisComponentSpecifications {
+  infrastructureSpecMarkdown: string | null;
+  apiSpecMarkdown: string | null;
+  databaseSchemaSpecMarkdown: string | null;
+  businessLogicSpecMarkdown: string | null;
+}
+
 export function buildSourceAnalysisPrompt(
   payload: AnalysisTaskPayload,
   inputs: AnalysisInput,
@@ -162,11 +169,93 @@ export function buildDriftReportPrompt(
   ].join("\n");
 }
 
+export function buildSsotSynthesisPrompt(
+  payload: AnalysisTaskPayload,
+  sourceSpecification: SpecificationResult,
+  documentSpecification: SpecificationResult,
+  componentSpecifications: SynthesisComponentSpecifications,
+): string {
+  return [
+    "[TASK: SSOT_SYNTHESIS]",
+    "",
+    "あなたはレガシーシステムの個別解析結果を統合し、",
+    "システム全体の真実の仕様書（Single Source of Truth）を作成する統合エージェントです。",
+    "ソースコード由来の解析結果を正として扱い、既存ドキュメントは補助情報としてのみ扱ってください。",
+    "根拠が不足する項目は断定せず、「判断不能」または「推測」と明示してください。",
+    "",
+    "## 統合対象",
+    "",
+    `- ジョブID: ${payload.jobId}`,
+    `- プロジェクト名: ${payload.projectName || "未指定"}`,
+    "",
+    "## 統合方針",
+    "",
+    "- インフラ、API、DB、ビジネスロジックの関係を接着して、コンポーネント間の依存関係を説明してください。",
+    "- エンドポイントから入力検証、ユースケース、DB更新、バックグラウンド処理、インフラ実行基盤までのデータフローを追ってください。",
+    "- Mermaid によるシステムコンポーネント図とデータフロー図を必ず出力してください。",
+    "- 入力された個別仕様書に矛盾がある場合は、矛盾点と優先した根拠を明示してください。",
+    "- 入力が不足している専門領域は、ソースコード解析結果から判明する範囲だけを書き、不明点を残してください。",
+    "",
+    "## 出力形式（必ず以下のMarkdown構成で出力してください）",
+    "",
+    "1. **解析対象サマリー** — 対象プロジェクト、統合した入力、根拠の優先順位",
+    "2. **システム全体像** — 主要コンポーネント、責務、外部接続、実行基盤",
+    "3. **システムコンポーネント図** — Mermaid flowchart 形式",
+    "4. **データフロー図** — Mermaid flowchart または sequenceDiagram 形式",
+    "5. **コンポーネント責務一覧** — インフラ/API/DB/ビジネスロジックの責務と根拠",
+    "6. **エンドポイント別データフロー** — APIエンドポイント、呼び出すユースケース、参照/更新DB、非同期処理、根拠",
+    "7. **バックグラウンド処理・非同期処理** — キュー、バッチ、イベント処理、リトライ/失敗時挙動",
+    "8. **インフラとアプリケーションの対応** — 実行基盤、ストレージ、DB、ネットワーク/IAM、根拠",
+    "9. **横断的な仕様** — 認証認可、バリデーション、トランザクション、監視、セキュリティ",
+    "10. **判断不能・推測事項** — 未確定事項、追加で必要な情報、矛盾やリスク",
+    "",
+    "## 個別解析結果: インフラ/IaC",
+    "",
+    formatOptionalMarkdown(
+      componentSpecifications.infrastructureSpecMarkdown,
+      "インフラ/IaC 個別仕様は生成されていません。ソースコード解析結果の IaC 候補を参照してください。",
+    ),
+    "",
+    "## 個別解析結果: API/インターフェース",
+    "",
+    formatOptionalMarkdown(
+      componentSpecifications.apiSpecMarkdown,
+      "API 個別仕様は生成されていません。ソースコード解析結果のルーティング/API候補を参照してください。",
+    ),
+    "",
+    "## 個別解析結果: DB・データモデル",
+    "",
+    formatOptionalMarkdown(
+      componentSpecifications.databaseSchemaSpecMarkdown,
+      "DB・データモデル個別仕様は生成されていません。",
+    ),
+    "",
+    "## 個別解析結果: ビジネスロジック・ユースケース",
+    "",
+    formatOptionalMarkdown(
+      componentSpecifications.businessLogicSpecMarkdown,
+      "ビジネスロジック個別仕様は生成されていません。",
+    ),
+    "",
+    "## ソースコード解析結果（補助根拠）",
+    "",
+    sourceSpecification.summary,
+    "",
+    "## 既存ドキュメント抽出結果（補助情報）",
+    "",
+    documentSpecification.summary,
+  ].join("\n");
+}
+
 function formatTextFiles(files: Array<{ path: string; content: string }>): string {
   const blocks = files.map((file) =>
     [`### ${file.path}`, "", "```text", file.content, "```"].join("\n"),
   );
   return blocks.length === 0 ? "入力ファイル本文はまだ取得されていません。" : blocks.join("\n\n");
+}
+
+function formatOptionalMarkdown(markdown: string | null, emptyMessage: string): string {
+  return markdown && markdown.trim() ? markdown.trim() : emptyMessage;
 }
 
 export function buildDatabaseSchemaAnalysisPrompt(

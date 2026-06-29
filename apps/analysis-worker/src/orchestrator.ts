@@ -8,7 +8,9 @@ import {
   DatabaseSchemaEngine,
   generatedArtifacts,
   ExtractionResult,
+  SsotSynthesisGenerator,
 } from "./engines.js";
+import type { SynthesisComponentSpecifications } from "./prompts.js";
 
 export class WorkerResult {
   jobId: string;
@@ -56,6 +58,7 @@ export class AnalysisOrchestrator {
   private driftReportGenerator: DesignGenerator;
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
+  private ssotSynthesisGenerator: SsotSynthesisGenerator | null;
 
   constructor({
     jobRepository,
@@ -67,6 +70,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator,
     databaseSchemaEngine = null,
     businessLogicEngine = null,
+    ssotSynthesisGenerator = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -77,6 +81,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator: DesignGenerator;
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
+    ssotSynthesisGenerator?: SsotSynthesisGenerator | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -87,6 +92,7 @@ export class AnalysisOrchestrator {
     this.driftReportGenerator = driftReportGenerator;
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
+    this.ssotSynthesisGenerator = ssotSynthesisGenerator;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -127,13 +133,38 @@ export class AnalysisOrchestrator {
         );
       }
 
-      const artifacts = generatedArtifacts(
-        await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
-        await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
-        sourceSpecification.artifacts,
+      const componentSpecifications = buildSynthesisComponentSpecifications(
+        sourceSpecification,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
       );
+
+      let ssotMarkdown: string | null = null;
+      if (this.ssotSynthesisGenerator) {
+        ssotMarkdown = await this.ssotSynthesisGenerator.generate(
+          payload,
+          sourceSpecification,
+          documentSpecification,
+          componentSpecifications,
+        );
+      }
+
+      const artifacts = generatedArtifacts({
+        trueDesignMarkdown: await this.trueDesignGenerator.generate(
+          payload,
+          sourceSpecification,
+          documentSpecification,
+        ),
+        driftReportMarkdown: await this.driftReportGenerator.generate(
+          payload,
+          sourceSpecification,
+          documentSpecification,
+        ),
+        ssotMarkdown,
+        extraFiles: sourceSpecification.artifacts,
+        databaseSchemaSpecMarkdown,
+        businessLogicSpecMarkdown,
+      });
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
         ...(documentSpecification.debugArtifacts ?? {}),
@@ -156,4 +187,77 @@ export class AnalysisOrchestrator {
       throw error;
     }
   }
+}
+
+function buildSynthesisComponentSpecifications(
+  sourceSpecification: ExtractionResult,
+  databaseSchemaSpecMarkdown: string | null,
+  businessLogicSpecMarkdown: string | null,
+): SynthesisComponentSpecifications {
+  const artifacts = sourceSpecification.artifacts ?? {};
+  return {
+    infrastructureSpecMarkdown: firstArtifactContent(artifacts, [
+      "infrastructure_spec.md",
+      "infrastructure-spec.md",
+      "iac-structure.md",
+    ]),
+    apiSpecMarkdown: collectApiSpecMarkdown(artifacts),
+    databaseSchemaSpecMarkdown,
+    businessLogicSpecMarkdown,
+  };
+}
+
+function firstArtifactContent(
+  artifacts: Record<string, string>,
+  candidateNames: string[],
+): string | null {
+  for (const name of candidateNames) {
+    const content = artifacts[name];
+    if (content && content.trim()) {
+      return content;
+    }
+  }
+  return null;
+}
+
+function collectApiSpecMarkdown(artifacts: Record<string, string>): string | null {
+  const apiArtifacts = Object.entries(artifacts)
+    .filter(([name, content]) => isApiSpecArtifact(name) && content.trim())
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (apiArtifacts.length === 0) {
+    return null;
+  }
+  return apiArtifacts
+    .map(([name, content]) =>
+      [`### ${name}`, "", `\`\`\`${fenceLanguageForArtifact(name)}`, content.trim(), "```"].join(
+        "\n",
+      ),
+    )
+    .join("\n\n");
+}
+
+function isApiSpecArtifact(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return (
+    normalized.includes("api-spec") ||
+    normalized.includes("api_spec") ||
+    normalized.includes("api-specification") ||
+    normalized.includes("api_specification") ||
+    normalized.includes("openapi") ||
+    normalized.includes("swagger")
+  );
+}
+
+function fenceLanguageForArtifact(name: string): string {
+  const normalized = name.toLowerCase();
+  if (normalized.endsWith(".json")) {
+    return "json";
+  }
+  if (normalized.endsWith(".yaml") || normalized.endsWith(".yml")) {
+    return "yaml";
+  }
+  if (normalized.endsWith(".md")) {
+    return "markdown";
+  }
+  return "text";
 }
