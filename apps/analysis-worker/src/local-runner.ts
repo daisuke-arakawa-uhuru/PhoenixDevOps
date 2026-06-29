@@ -9,6 +9,7 @@ import {
   GeminiTrueDesignGenerator,
   GeminiDatabaseSchemaAnalysisEngine,
   GeminiBusinessLogicAnalysisEngine,
+  GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
@@ -60,6 +61,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
+    apiSpecificationEngine: new GeminiApiSpecificationAnalysisEngine(geminiClient),
   });
 
   const result = await orchestrator.run(payload);
