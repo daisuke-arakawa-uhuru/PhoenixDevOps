@@ -3,6 +3,7 @@ import {
   GeminiDriftReportGenerator,
   GeminiSourceCodeAnalysisEngine,
   GeminiTrueDesignGenerator,
+  GeminiDatabaseSchemaAnalysisEngine,
   GeminiBusinessLogicAnalysisEngine,
 } from "./engines.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
@@ -34,7 +35,7 @@ export function buildOrchestrator(config: WorkerConfig): AnalysisOrchestrator {
     documentEngine: new GeminiDocumentExtractionEngine(geminiClient),
     trueDesignGenerator: new GeminiTrueDesignGenerator(geminiClient),
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
+    databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
   });
 }
-

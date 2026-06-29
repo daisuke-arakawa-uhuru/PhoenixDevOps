@@ -15,6 +15,27 @@ test("buildGeminiClient uses dry-run client only when explicitly enabled", () =>
   assert.ok(client instanceof DryRunGeminiClient);
 });
 
+test("DryRunGeminiClient returns database schema analysis markdown", async () => {
+  const client = new DryRunGeminiClient();
+
+  const response = await client.generate(
+    [
+      "[TASK: DATABASE_SCHEMA_ANALYSIS]",
+      "",
+      "## STEP 1 成果物: コードベースマップ（codebase-map.json 抜粋）",
+      "",
+      '{"databaseDefinitions":[]}',
+      "",
+      "## DB関連ソースコード",
+      "",
+      "### prisma/schema.prisma",
+    ].join("\n"),
+  );
+
+  assert.match(response, /DB・データモデル仕様書（dry-run）/);
+  assert.match(response, /erDiagram/);
+});
+
 test("buildGeminiClient uses Vertex AI client when project and location are configured", () => {
   const client = buildGeminiClient(
     new GeminiSettings({

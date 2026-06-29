@@ -5,6 +5,7 @@ import {
   buildCodebaseMap,
   codebaseMapArtifacts,
   renderSourceOverviewMarkdown,
+  identifyDatabaseDefinitionFiles,
   identifyBusinessLogicFiles,
   collectExportedSymbolsSummary,
   CodebaseMap,
@@ -14,6 +15,7 @@ import {
   buildDriftReportPrompt,
   buildSourceAnalysisPrompt,
   buildTrueDesignPrompt,
+  buildDatabaseSchemaAnalysisPrompt,
   buildBusinessLogicAnalysisPrompt,
 } from "./prompts.js";
 
@@ -204,6 +206,73 @@ export interface BusinessLogicEngine {
   ): Promise<string>;
 }
 
+export interface DatabaseSchemaEngine {
+  analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string>;
+}
+
+export class GeminiDatabaseSchemaAnalysisEngine implements DatabaseSchemaEngine {
+  constructor(private geminiClient: GeminiClient) {}
+
+  async analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string> {
+    const analysisFiles =
+      inputs.allSourceFiles && inputs.allSourceFiles.length > 0
+        ? inputs.allSourceFiles
+        : inputs.sourceFiles;
+
+    const codebaseMap =
+      (sourceSpecification.extractedItems.static_overview as CodebaseMap | undefined) ??
+      buildCodebaseMap(analysisFiles);
+    const databaseDefinitionFiles = identifyDatabaseDefinitionFiles(codebaseMap, analysisFiles, 40);
+    const databaseFilePaths = new Set(databaseDefinitionFiles.map((file) => file.path));
+    const codebaseMapJson = JSON.stringify(
+      {
+        summary: codebaseMap.summary,
+        databaseDefinitions: codebaseMap.databaseDefinitions,
+        databaseFiles: codebaseMap.files.filter((file) => databaseFilePaths.has(file.path)),
+        dependencies: codebaseMap.dependencies,
+        configFiles: codebaseMap.configFiles,
+      },
+      null,
+      2,
+    );
+
+    const prompt = buildDatabaseSchemaAnalysisPrompt(
+      payload,
+      inputs,
+      databaseDefinitionFiles,
+      codebaseMapJson,
+    );
+
+    return this.geminiClient.generate(prompt);
+  }
+}
+
+export class PlaceholderDatabaseSchemaEngine implements DatabaseSchemaEngine {
+  async analyze(): Promise<string> {
+    return [
+      "# DB・データモデル仕様書",
+      "",
+      "この成果物はプレースホルダーです。",
+      "Gemini API による DB・データモデル解析はまだ実行されていません。",
+      "",
+      "## テーブル一覧",
+      "",
+      "| テーブル/モデル | 概要 | 根拠ファイル |",
+      "| --- | --- | --- |",
+      "| (未解析) | - | - |",
+      "",
+    ].join("\n");
+  }
+}
+
 export class GeminiBusinessLogicAnalysisEngine implements BusinessLogicEngine {
   constructor(private geminiClient: GeminiClient) {}
 
@@ -279,11 +348,13 @@ export function generatedArtifacts(
   trueDesignMarkdown: string,
   driftReportMarkdown: string,
   extraFiles: Record<string, string> = {},
+  databaseSchemaSpecMarkdown: string | null = null,
   businessLogicSpecMarkdown: string | null = null,
 ) {
   return {
     trueDesignMarkdown,
     driftReportMarkdown,
+    databaseSchemaSpecMarkdown,
     businessLogicSpecMarkdown,
     extraFiles: { ...extraFiles },
     asFiles() {
@@ -292,6 +363,9 @@ export function generatedArtifacts(
         "document-drift-report.md": this.driftReportMarkdown,
         ...this.extraFiles,
       };
+      if (this.databaseSchemaSpecMarkdown) {
+        files["database_schema_spec.md"] = this.databaseSchemaSpecMarkdown;
+      }
       if (this.businessLogicSpecMarkdown) {
         files["business_logic_spec.md"] = this.businessLogicSpecMarkdown;
       }

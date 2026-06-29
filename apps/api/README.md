@@ -83,7 +83,7 @@ Firestore の `jobs/{jobId}` を読み、現在の状態を返します。
 
 ### `GET /jobs/{jobId}/results`
 
-`succeeded` のジョブだけ成果物の署名付き URL を返します。ワーカーが保存する成果物は `true-design.md` と `document-drift-report.md` を想定しています。
+`succeeded` のジョブだけ成果物の署名付き URL を返します。レスポンスは Firestore の `artifact_paths` に保存された全成果物を返すため、`true-design.md`、`document-drift-report.md`、`database_schema_spec.md` などの追加成果物も同じ形式で取得できます。
 
 ## Firestore schema
 

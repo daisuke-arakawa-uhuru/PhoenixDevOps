@@ -203,6 +203,53 @@ export class DryRunGeminiClient implements GeminiClient {
         truncate(documentSummary, 2500),
       ].join("\n");
     }
+    if (prompt.includes("[TASK: DATABASE_SCHEMA_ANALYSIS]")) {
+      const codebaseMapSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: コードベースマップ（codebase-map.json 抜粋）",
+        "## DB関連ソースコード",
+      );
+      const databaseSourceSection = extractPromptSection(
+        prompt,
+        "## DB関連ソースコード",
+        "__END_OF_DATABASE_SCHEMA_PROMPT__",
+      );
+      return [
+        "# DB・データモデル仕様書（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、DB・データモデル解析フェーズの接続だけを確認しています。",
+        "",
+        "## 解析対象サマリー",
+        "",
+        "- dry-run のため実際の解析は行っていません。",
+        "",
+        "## ER図",
+        "",
+        "```mermaid",
+        "erDiagram",
+        "    DRY_RUN_ENTITY {",
+        "        string id",
+        "    }",
+        "```",
+        "",
+        "## テーブル一覧",
+        "",
+        "| テーブル/モデル | 概要 | 主キー | 根拠ファイル |",
+        "| --- | --- | --- | --- |",
+        "| DRY_RUN_ENTITY | DB解析フェーズの接続確認 | id | - |",
+        "",
+        "## 入力サマリー",
+        "",
+        "### コードベースマップ",
+        "",
+        truncate(codebaseMapSection, 2000),
+        "",
+        "### DB関連ソースコード",
+        "",
+        truncate(databaseSourceSection, 2000),
+      ].join("\n");
+    }
     if (prompt.includes("[TASK: BUSINESS_LOGIC_ANALYSIS]")) {
       const codebaseMapSection = extractPromptSection(
         prompt,

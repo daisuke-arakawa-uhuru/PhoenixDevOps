@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AnalysisEngine, DesignGenerator, ExtractionResult } from "../src/engines.js";
+import {
+  AnalysisEngine,
+  DatabaseSchemaEngine,
+  DesignGenerator,
+  ExtractionResult,
+} from "../src/engines.js";
 import { AnalysisOrchestrator } from "../src/orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "../src/payload.js";
 import { InMemoryJobRepository, JobStatus } from "../src/repositories.js";
@@ -33,7 +38,13 @@ class StaticGenerator implements DesignGenerator {
   }
 }
 
-test("AnalysisOrchestrator writes source analysis artifacts alongside generated Markdown", async () => {
+class StaticDatabaseSchemaEngine implements DatabaseSchemaEngine {
+  async analyze(): Promise<string> {
+    return "# DB Schema\n";
+  }
+}
+
+test("AnalysisOrchestrator writes source analysis and DB schema artifacts alongside generated Markdown", async () => {
   const writer = new InMemoryArtifactWriter();
   const orchestrator = new AnalysisOrchestrator({
     jobRepository: new InMemoryJobRepository(),
@@ -55,6 +66,7 @@ test("AnalysisOrchestrator writes source analysis artifacts alongside generated 
     }),
     trueDesignGenerator: new StaticGenerator("# True Design\n"),
     driftReportGenerator: new StaticGenerator("# Drift Report\n"),
+    databaseSchemaEngine: new StaticDatabaseSchemaEngine(),
   });
   const payload = new AnalysisTaskPayload({
     jobId: "job-1",
@@ -70,6 +82,7 @@ test("AnalysisOrchestrator writes source analysis artifacts alongside generated 
   assert.deepEqual(Object.keys(files).sort(), [
     "codebase-map.json",
     "codebase-map.md",
+    "database_schema_spec.md",
     "document-drift-report.md",
     "iac-structure.md",
     "module-dependencies.mmd",
