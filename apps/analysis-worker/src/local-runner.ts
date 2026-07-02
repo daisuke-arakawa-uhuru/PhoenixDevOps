@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { loadLocalEnv } from "./local-env.js";
+loadLocalEnv();
+
 import { WorkerConfig } from "./config.js";
 import {
   GeminiDocumentExtractionEngine,
@@ -10,13 +13,13 @@ import {
   GeminiDatabaseSchemaAnalysisEngine,
   GeminiBusinessLogicAnalysisEngine,
   GeminiSsotSynthesisGenerator,
+  GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
 import { InMemoryJobRepository } from "./repositories.js";
 import { LocalArtifactWriter, LocalFileInputLoader } from "./storage.js";
-import { loadLocalEnv } from "./local-env.js";
 
 interface Args {
   source: string;
@@ -29,7 +32,6 @@ interface Args {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
-  loadLocalEnv();
   const config = WorkerConfig.fromEnv(process.env);
   const geminiClient = buildGeminiClient(
     new GeminiSettings({
@@ -51,9 +53,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     resultsPrefix: jobId,
   });
 
+  const maxFiles = process.env.MAX_FILES ? parseInt(process.env.MAX_FILES, 10) : Infinity;
+  const maxCharsPerFile = process.env.MAX_CHARS_PER_FILE ? parseInt(process.env.MAX_CHARS_PER_FILE, 10) : Infinity;
+
   const orchestrator = new AnalysisOrchestrator({
     jobRepository: new InMemoryJobRepository(),
-    inputLoader: new LocalFileInputLoader(args.source, args.documents),
+    inputLoader: new LocalFileInputLoader(args.source, args.documents, { maxFiles, maxCharsPerFile }),
     artifactWriter: new LocalArtifactWriter(args.output),
     sourceCodeEngine: new GeminiSourceCodeAnalysisEngine(geminiClient),
     documentEngine: new GeminiDocumentExtractionEngine(geminiClient),
@@ -62,6 +67,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
     ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),
+    apiSpecificationEngine: new GeminiApiSpecificationAnalysisEngine(geminiClient),
   });
 
   const result = await orchestrator.run(payload);

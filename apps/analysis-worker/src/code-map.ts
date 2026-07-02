@@ -2009,3 +2009,196 @@ export function collectExportedSymbolsSummary(
     .map(([name, content]) => `### ${name}\n\n${content}`)
     .join("\n\n---\n\n");
 }
+
+/**
+ * API・インターフェース解析のパスキーワード。
+ * コントローラー、ルーティング、ハンドラー、ミドルウェア、バリデーション関連を優先する。
+ */
+const API_RELATED_PATH_KEYWORDS = [
+  "controller",
+  "controllers",
+  "route",
+  "routes",
+  "router",
+  "routers",
+  "routing",
+  "handler",
+  "handlers",
+  "middleware",
+  "middlewares",
+  "validator",
+  "validators",
+  "validation",
+  "api",
+  "endpoint",
+  "endpoints",
+  "rest",
+  "graphql",
+  "grpc",
+  "schema",
+  "schemas",
+  "dto",
+  "dtos",
+  "request",
+  "response",
+  "serializer",
+  "serializers",
+  "interceptor",
+  "interceptors",
+  "filter",
+  "filters",
+  "guard",
+  "guards",
+  "pipe",
+  "pipes",
+  "decorator",
+  "decorators",
+  "openapi",
+  "swagger",
+];
+
+/**
+ * API解析で除外するパスパターン。
+ */
+const API_EXCLUDE_PATTERNS = [
+  "/node_modules/",
+  "/dist/",
+  "/build/",
+  "/.next/",
+  "/coverage/",
+  "/test/",
+  "/tests/",
+  "/__tests__/",
+  "/spec/",
+  "/e2e/",
+  "/fixtures/",
+  "/mocks/",
+  "/.storybook/",
+  "/storybook/",
+  "/stories/",
+  "/playwright/",
+  "/cypress/",
+  "/assets/",
+  "/images/",
+  "/fonts/",
+  "/public/",
+  "/static/",
+  "/infra/",
+  "/terraform/",
+  "/cdk/",
+  "/cloudformation/",
+  "/.github/",
+  "/.vscode/",
+  "/generated/",
+  "/__generated__/",
+];
+
+/**
+ * CodebaseMap と生ファイルから API・インターフェース関連のファイルを特定し、
+ * 優先順位付けして返す。
+ *
+ * 返却されるファイルは:
+ * 1. codebaseMap.apiRoutes で検出済みのルーティング定義ファイル（最高優先）
+ * 2. API関連キーワードを含むパスのファイル（高優先）
+ * 3. ソースコード拡張子を持ち、除外パターンに該当しないファイル（低優先）
+ */
+export function identifyApiRelatedFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 60,
+): SourceFile[] {
+  // apiRoutes で検出済みのファイルパスを収集
+  const apiRoutePaths = new Set(
+    codebaseMap.apiRoutes.map((route) => {
+      // source は "path:lineNumber" 形式の場合がある
+      const colonIndex = route.source.lastIndexOf(":");
+      return colonIndex > 0 ? route.source.slice(0, colonIndex) : route.source;
+    }),
+  );
+
+  // 除外対象フィルタ
+  const isExcluded = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return API_EXCLUDE_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // APIキーワードスコア
+  const apiKeywordScore = (filePath: string): number => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    const segments = normalized.split("/");
+    let score = 0;
+    for (const keyword of API_RELATED_PATH_KEYWORDS) {
+      if (segments.some((seg) => seg.includes(keyword))) {
+        score += 10;
+      }
+    }
+    // ファイル名自体にキーワードが含まれる場合はボーナス
+    const basename = segments.at(-1) ?? "";
+    for (const keyword of API_RELATED_PATH_KEYWORDS) {
+      if (basename.includes(keyword)) {
+        score += 5;
+      }
+    }
+    return score;
+  };
+
+  // ソースコードファイルかどうか
+  const isSourceCode = (filePath: string): boolean => {
+    const ext = path.extname(filePath).toLowerCase();
+    return SOURCE_EXTENSIONS.has(ext);
+  };
+
+  // API関連コンテンツシグナル（ファイル内容からAPIパターンを検出）
+  const hasApiContentSignal = (file: SourceFile): boolean => {
+    const content = file.content;
+    // Express/Koa/Fastify 系
+    if (/\b(?:app|router)\.(get|post|put|delete|patch|options|head|all|use)\s*\(/.test(content)) return true;
+    // FastAPI / Flask 系
+    if (/@(?:\w+\.)?(?:app|router|api)\.(get|post|put|delete|patch)\s*\(/.test(content)) return true;
+    // Django
+    if (/\b(?:path|re_path|url)\s*\(/.test(content)) return true;
+    // Spring
+    if (/@(?:Get|Post|Put|Delete|Patch|Request)Mapping/.test(content)) return true;
+    // NestJS
+    if (/@(?:Get|Post|Put|Delete|Patch|Controller)\s*\(/.test(content)) return true;
+    // OpenAPI / Swagger annotations
+    if (/@(?:Api(?:Operation|Response|Param|Model)|swagger)/.test(content)) return true;
+    // バリデーション系
+    if (/\b(?:body|query|param|header)\s*\(/.test(content) && /\b(?:validate|validation|check|sanitize)\b/i.test(content)) return true;
+    return false;
+  };
+
+  // フィルタリング
+  const candidates = rawFiles.filter((file) => {
+    if (!isSourceCode(file.path)) return false;
+    if (isExcluded(file.path)) return false;
+    if (isTestFile(file.path)) return false;
+    return true;
+  });
+
+  // スコアリングとソート
+  const scored = candidates.map((file) => {
+    let score = 0;
+    // apiRoutes 検出済みファイルは最高優先
+    if (apiRoutePaths.has(file.path)) {
+      score += 200;
+    }
+    // パスキーワードスコア
+    score += apiKeywordScore(file.path);
+    // ファイル内容にAPIパターンが含まれる場合
+    if (hasApiContentSignal(file)) {
+      score += 50;
+    }
+    // ファイルサイズ（行数）が多いほうが重要なロジックが含まれる可能性
+    const lines = file.content.split("\n").length;
+    if (lines > 50) score += 2;
+    if (lines > 200) score += 3;
+    return { file, score };
+  });
+
+  // スコア0のファイルは除外（API関連でないため）
+  const relevant = scored.filter((s) => s.score > 0);
+
+  relevant.sort((a, b) => b.score - a.score);
+  return relevant.slice(0, maxFiles).map((s) => s.file);
+}

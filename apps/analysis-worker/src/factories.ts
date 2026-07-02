@@ -6,6 +6,7 @@ import {
   GeminiDatabaseSchemaAnalysisEngine,
   GeminiBusinessLogicAnalysisEngine,
   GeminiSsotSynthesisGenerator,
+  GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
@@ -39,5 +40,6 @@ export function buildOrchestrator(config: WorkerConfig): AnalysisOrchestrator {
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
     ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),
+    apiSpecificationEngine: new GeminiApiSpecificationAnalysisEngine(geminiClient),
   });
 }

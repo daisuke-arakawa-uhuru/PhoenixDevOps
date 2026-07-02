@@ -6,15 +6,85 @@ import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
 import pdfParse from "pdf-parse";
 
 const SKIPPED_DIRS = new Set([
+  // 共通・ビルド・キャッシュ
   ".git",
-  ".venv",
-  "__pycache__",
-  "node_modules",
   "dist",
   "build",
   "coverage",
+  // Node.js
+  "node_modules",
   ".next",
+  // Python
+  ".venv",
+  "venv",
+  "env",
+  "__pycache__",
+  ".pytest_cache",
+  ".tox",
+  // Go / PHP
+  "vendor",
+  // Rust / Java (Maven)
+  "target",
+  // Java (Gradle)
+  ".gradle",
 ]);
+
+const SKIPPED_FILES = new Set([
+  // Node.js
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  // Python
+  "poetry.lock",
+  "Pipfile.lock",
+  // Go
+  "go.sum",
+  // Rust
+  "cargo.lock",
+  "Cargo.lock",
+  // Ruby
+  "Gemfile.lock",
+  // PHP
+  "composer.lock",
+]);
+
+function isSkippedDir(dirName: string): boolean {
+  if (SKIPPED_DIRS.has(dirName)) {
+    return true;
+  }
+  if (process.env.GEMINI_SKIPPED_DIRS) {
+    const list = process.env.GEMINI_SKIPPED_DIRS.split(",").map((d) => d.trim());
+    if (list.includes(dirName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSkippedFile(fileName: string): boolean {
+  const baseName = path.basename(fileName);
+  if (SKIPPED_FILES.has(baseName)) {
+    return true;
+  }
+  if (process.env.GEMINI_SKIPPED_FILES) {
+    const list = process.env.GEMINI_SKIPPED_FILES.split(",").map((f) => f.trim());
+    if (list.includes(baseName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldSkipFile(filePath: string, sizeBytes: number): boolean {
+  if (isSkippedFile(filePath)) {
+    return true;
+  }
+  // 100KB以上のファイルは自動生成や巨大データとみなしてすべて除外
+  if (sizeBytes > 100 * 1024) {
+    return true;
+  }
+  return false;
+}
 
 const TEXT_EXTENSIONS = new Set([
   "",
@@ -255,7 +325,13 @@ function contentTypeForArtifact(fileName: string): string {
 function readSourceFiles(sourcePath: string, maxCharsPerFile: number): Array<{ path: string; content: string }> {
   if (fs.statSync(sourcePath).isDirectory()) {
     return walkFiles(sourcePath)
-      .filter((filePath) => !shouldSkip(relativeParts(sourcePath, filePath)))
+      .filter((filePath) => {
+        if (shouldSkip(relativeParts(sourcePath, filePath))) {
+          return false;
+        }
+        const stats = fs.statSync(filePath);
+        return !shouldSkipFile(filePath, stats.size);
+      })
       .map((filePath) => {
         const text = readText(filePath, maxCharsPerFile);
         if (text == null) {
@@ -268,6 +344,11 @@ function readSourceFiles(sourcePath: string, maxCharsPerFile: number): Array<{ p
 
   if (path.extname(sourcePath).toLowerCase() === ".zip") {
     return readZipTextFiles(fs.readFileSync(sourcePath), maxCharsPerFile);
+  }
+
+  const stats = fs.statSync(sourcePath);
+  if (shouldSkipFile(sourcePath, stats.size)) {
+    return [];
   }
 
   const text = readText(sourcePath, maxCharsPerFile);
@@ -339,6 +420,9 @@ export function readSourceObject(
   if (suffix === ".zip") {
     return readZipTextFiles(data, maxCharsPerFile);
   }
+  if (shouldSkipFile(objectName, data.length)) {
+    return [];
+  }
   if (TEXT_EXTENSIONS.has(suffix)) {
     const text = decodeUtf8(data, maxCharsPerFile);
     return text == null ? [] : [{ path: objectName, content: text }];
@@ -384,6 +468,9 @@ function readZipTextFiles(
   for (const entry of readZipEntries(data)) {
     const entryParts = entry.name.split("/");
     if (shouldSkip(entryParts)) {
+      continue;
+    }
+    if (shouldSkipFile(entry.name, entry.data.length)) {
       continue;
     }
     if (!TEXT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
@@ -547,7 +634,7 @@ function truncate(text: string, maxChars: number): string {
 }
 
 function shouldSkip(parts: string[]): boolean {
-  return parts.some((part) => SKIPPED_DIRS.has(part));
+  return parts.some((part) => isSkippedDir(part));
 }
 
 function relativeParts(rootPath: string, filePath: string): string[] {

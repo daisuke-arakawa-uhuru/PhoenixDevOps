@@ -148,6 +148,7 @@ STEP 1 の静的解析結果として、後続の専門エージェントがコ�
 | `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
 | `database_schema_spec.md` | DB定義コードから生成したER図、データディクショナリ、リレーション・制約一覧 |
 | `single-source-of-truth.md` | インフラ/API/DB/ビジネスロジック解析結果を統合したシステム全体のSSOT仕様書 |
+| `api_specification.md` | ルーティング、コントローラー、バリデーションから抽出したAPI仕様書 |
 
 ## 7. 判断ルール
 
@@ -191,6 +192,7 @@ Cloud Functions の HTTP レスポンスは次の方針とする。
 | 機能内コンポーネント | 解析オーケストレーター | 解析ジョブの状態管理、各解析処理、成果物生成を制御する |
 | 機能内コンポーネント | ソースコード解析 | ソースコードを正として、実装ベースの仕様を抽出する |
 | 機能内コンポーネント | ドキュメント抽出 | 既存ドキュメントの記載内容を抽出する |
+| 機能内コンポーネント | API・インターフェース解析 | ルーティング、コントローラー、バリデーションからAPI仕様書を生成する |
 | 機能内コンポーネント | 成果物生成 | 真の設計書とドキュメント差分レポートを生成する |
 
 ### 9.2. 処理シーケンス
@@ -327,6 +329,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | DB・データモデル解析 | `DATABASE_SCHEMA_ANALYSIS` | DB定義コードからER図、データディクショナリ、リレーション・制約一覧を生成する |
 | ビジネスロジック解析 | `BUSINESS_LOGIC_ANALYSIS` | サービス層、ドメインモデル、ユースケースから業務フローと状態遷移を生成する |
 | SSOT合成 | `SSOT_SYNTHESIS` | インフラ/API/DB/ビジネスロジックの個別解析結果を統合し、コンポーネント図とデータフロー図を含むシステム全体仕様を生成する |
+| API・インターフェース解析 | `API_SPECIFICATION_ANALYSIS` | ルーティング、コントローラー、バリデーションから全APIエンドポイントを抽出しAPI仕様書を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
 
@@ -343,6 +346,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
 | DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |
 | ビジネスロジック仕様書 | `business_logic_spec.md` | Gemini 生成 |
+| API仕様書 | `api_specification.md` | Gemini 生成 |
 | コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。

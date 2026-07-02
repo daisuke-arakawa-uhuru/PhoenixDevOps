@@ -6,6 +6,7 @@ import {
   DesignGenerator,
   BusinessLogicEngine,
   DatabaseSchemaEngine,
+  ApiSpecificationEngine,
   generatedArtifacts,
   ExtractionResult,
   SsotSynthesisGenerator,
@@ -58,6 +59,7 @@ export class AnalysisOrchestrator {
   private driftReportGenerator: DesignGenerator;
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
+  private apiSpecificationEngine: ApiSpecificationEngine | null;
   private ssotSynthesisGenerator: SsotSynthesisGenerator | null;
 
   constructor({
@@ -70,6 +72,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator,
     databaseSchemaEngine = null,
     businessLogicEngine = null,
+    apiSpecificationEngine = null,
     ssotSynthesisGenerator = null,
   }: {
     jobRepository: JobRepository;
@@ -81,6 +84,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator: DesignGenerator;
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
+    apiSpecificationEngine?: ApiSpecificationEngine | null;
     ssotSynthesisGenerator?: SsotSynthesisGenerator | null;
   }) {
     this.jobRepository = jobRepository;
@@ -92,6 +96,7 @@ export class AnalysisOrchestrator {
     this.driftReportGenerator = driftReportGenerator;
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
+    this.apiSpecificationEngine = apiSpecificationEngine;
     this.ssotSynthesisGenerator = ssotSynthesisGenerator;
   }
 
@@ -133,6 +138,15 @@ export class AnalysisOrchestrator {
         );
       }
 
+      let apiSpecificationMarkdown: string | null = null;
+      if (this.apiSpecificationEngine) {
+        apiSpecificationMarkdown = await this.apiSpecificationEngine.analyze(
+          payload,
+          inputs,
+          sourceSpecification,
+        );
+      }
+
       const componentSpecifications = buildSynthesisComponentSpecifications(
         sourceSpecification,
         databaseSchemaSpecMarkdown,
@@ -164,6 +178,7 @@ export class AnalysisOrchestrator {
         extraFiles: sourceSpecification.artifacts,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
+        apiSpecificationMarkdown,
       });
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
