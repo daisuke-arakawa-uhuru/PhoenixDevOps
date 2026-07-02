@@ -306,6 +306,58 @@ export class DryRunGeminiClient implements GeminiClient {
         truncate(exportedSymbolsSection, 2000),
       ].join("\n");
     }
+    if (prompt.includes("[TASK: API_SPECIFICATION_ANALYSIS]")) {
+      const codebaseMapSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: コードベースマップ（codebase-map.json）",
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+      );
+      const exportedSymbolsSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+        "## API関連ソースコード",
+      );
+      return [
+        "# API仕様書（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、API・インターフェース解析フェーズの接続だけを確認しています。",
+        "",
+        "## 解析対象サマリー",
+        "",
+        "- dry-run のため実際の解析は行っていません。",
+        "",
+        "## API概要",
+        "",
+        "- ベースURL: (dry-run)",
+        "- 認証方式: (dry-run)",
+        "",
+        "## エンドポイント一覧",
+        "",
+        "| メソッド | パス | 概要 | コントローラー | 認証 | 根拠ファイル |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "| GET | /api/dry-run | API解析フェーズの接続確認 | DryRunController | - | - |",
+        "",
+        "## エンドポイント詳細",
+        "",
+        "### `GET /api/dry-run`",
+        "",
+        "- 処理概要: dry-run のため実際の解析は行っていません。",
+        "- パスパラメータ: なし",
+        "- クエリパラメータ: なし",
+        "- レスポンス: `200 OK`",
+        "",
+        "## 入力サマリー",
+        "",
+        "### コードベースマップ",
+        "",
+        truncate(codebaseMapSection, 2000),
+        "",
+        "### エクスポートシンボル",
+        "",
+        truncate(exportedSymbolsSection, 2000),
+      ].join("\n");
+    }
     return "Gemini dry-run response";
   }
 }

@@ -6,6 +6,7 @@ import {
   DesignGenerator,
   BusinessLogicEngine,
   DatabaseSchemaEngine,
+  ApiSpecificationEngine,
   generatedArtifacts,
   ExtractionResult,
 } from "./engines.js";
@@ -56,6 +57,7 @@ export class AnalysisOrchestrator {
   private driftReportGenerator: DesignGenerator;
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
+  private apiSpecificationEngine: ApiSpecificationEngine | null;
 
   constructor({
     jobRepository,
@@ -67,6 +69,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator,
     databaseSchemaEngine = null,
     businessLogicEngine = null,
+    apiSpecificationEngine = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -77,6 +80,7 @@ export class AnalysisOrchestrator {
     driftReportGenerator: DesignGenerator;
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
+    apiSpecificationEngine?: ApiSpecificationEngine | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -87,6 +91,7 @@ export class AnalysisOrchestrator {
     this.driftReportGenerator = driftReportGenerator;
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
+    this.apiSpecificationEngine = apiSpecificationEngine;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -127,12 +132,23 @@ export class AnalysisOrchestrator {
         );
       }
 
+      // API・インターフェース解析（エンジンが設定されている場合のみ実行）
+      let apiSpecificationMarkdown: string | null = null;
+      if (this.apiSpecificationEngine) {
+        apiSpecificationMarkdown = await this.apiSpecificationEngine.analyze(
+          payload,
+          inputs,
+          sourceSpecification,
+        );
+      }
+
       const artifacts = generatedArtifacts(
         await this.trueDesignGenerator.generate(payload, sourceSpecification, documentSpecification),
         await this.driftReportGenerator.generate(payload, sourceSpecification, documentSpecification),
         sourceSpecification.artifacts,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
+        apiSpecificationMarkdown,
       );
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),

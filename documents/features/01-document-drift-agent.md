@@ -325,6 +325,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ドキュメント抽出 | `DOCUMENT_EXTRACTION` | 既存ドキュメント本文から仕様記述と根拠ドキュメントを抽出する |
 | DB・データモデル解析 | `DATABASE_SCHEMA_ANALYSIS` | DB定義コードからER図、データディクショナリ、リレーション・制約一覧を生成する |
 | ビジネスロジック解析 | `BUSINESS_LOGIC_ANALYSIS` | サービス層、ドメインモデル、ユースケースから業務フローと状態遷移を生成する |
+| API・インターフェース解析 | `API_SPECIFICATION_ANALYSIS` | ルーティング、コントローラー、バリデーションから全APIエンドポイントを抽出しAPI仕様書を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
 
@@ -340,6 +341,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
 | DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |
 | ビジネスロジック仕様書 | `business_logic_spec.md` | Gemini 生成 |
+| API仕様書 | `api_specification.md` | Gemini 生成 |
 | コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
