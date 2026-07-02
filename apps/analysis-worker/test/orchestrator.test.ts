@@ -1,8 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AnalysisEngine, DesignGenerator, ExtractionResult } from "../src/engines.js";
+import {
+  AnalysisEngine,
+  DatabaseSchemaEngine,
+  DesignGenerator,
+  ExtractionResult,
+  SsotSynthesisGenerator,
+} from "../src/engines.js";
+import { InfrastructureAgent } from "../src/infra.js";
 import { AnalysisOrchestrator } from "../src/orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "../src/payload.js";
+import { SynthesisComponentSpecifications } from "../src/prompts.js";
 import { InMemoryJobRepository, JobStatus } from "../src/repositories.js";
 import { InMemoryArtifactWriter, InputLoader, LoadedInputs } from "../src/storage.js";
 
@@ -35,8 +43,35 @@ class StaticGenerator implements DesignGenerator {
   }
 }
 
-test("AnalysisOrchestrator writes source analysis artifacts alongside generated Markdown", async () => {
+class StaticDatabaseSchemaEngine implements DatabaseSchemaEngine {
+  async analyze(): Promise<string> {
+    return "# DB Schema\n";
+  }
+}
+
+class StaticSsotSynthesisGenerator implements SsotSynthesisGenerator {
+  public componentSpecifications: SynthesisComponentSpecifications | null = null;
+
+  async generate(
+    _payload: AnalysisTaskPayload,
+    _sourceSpecification: ExtractionResult,
+    _documentSpecification: ExtractionResult,
+    componentSpecifications: SynthesisComponentSpecifications,
+  ): Promise<string> {
+    this.componentSpecifications = componentSpecifications;
+    return "# Single Source of Truth\n";
+  }
+}
+
+class StaticInfrastructureAgent implements InfrastructureAgent {
+  async analyze(): Promise<string> {
+    return "# Infrastructure Spec\n\nGenerated infrastructure view.\n";
+  }
+}
+
+test("AnalysisOrchestrator writes source analysis, component specs, and SSOT artifacts", async () => {
   const writer = new InMemoryArtifactWriter();
+  const ssotSynthesisGenerator = new StaticSsotSynthesisGenerator();
   const orchestrator = new AnalysisOrchestrator({
     jobRepository: new InMemoryJobRepository(),
     inputLoader: new StaticInputLoader(),
@@ -49,6 +84,7 @@ test("AnalysisOrchestrator writes source analysis artifacts alongside generated 
         "module-dependencies.mmd": "flowchart LR\n",
         "iac-structure.md": "# IaC Structure Dump\n",
         "codebase-map.json": "{}\n",
+        "api-spec.yaml": "openapi: 3.0.0\n",
       },
     }),
     documentEngine: new StaticEngine({
@@ -57,6 +93,9 @@ test("AnalysisOrchestrator writes source analysis artifacts alongside generated 
     }),
     trueDesignGenerator: new StaticGenerator("# True Design\n"),
     driftReportGenerator: new StaticGenerator("# Drift Report\n"),
+    infrastructureAgent: new StaticInfrastructureAgent(),
+    databaseSchemaEngine: new StaticDatabaseSchemaEngine(),
+    ssotSynthesisGenerator,
   });
   const payload = new AnalysisTaskPayload({
     jobId: "job-1",
@@ -70,11 +109,20 @@ test("AnalysisOrchestrator writes source analysis artifacts alongside generated 
 
   assert.equal(result.status, JobStatus.SUCCEEDED);
   assert.deepEqual(Object.keys(files).sort(), [
+    "api-spec.yaml",
     "codebase-map.json",
     "codebase-map.md",
+    "database_schema_spec.md",
     "document-drift-report.md",
     "iac-structure.md",
+    "infrastructure_spec.md",
     "module-dependencies.mmd",
+    "single-source-of-truth.md",
     "true-design.md",
   ]);
+  assert.equal(files["single-source-of-truth.md"], "# Single Source of Truth\n");
+  assert.equal(files["infrastructure_spec.md"], "# Infrastructure Spec\n\nGenerated infrastructure view.\n");
+  assert.match(ssotSynthesisGenerator.componentSpecifications?.infrastructureSpecMarkdown ?? "", /Infrastructure Spec/);
+  assert.match(ssotSynthesisGenerator.componentSpecifications?.apiSpecMarkdown ?? "", /openapi: 3\.0\.0/);
+  assert.match(ssotSynthesisGenerator.componentSpecifications?.databaseSchemaSpecMarkdown ?? "", /DB Schema/);
 });

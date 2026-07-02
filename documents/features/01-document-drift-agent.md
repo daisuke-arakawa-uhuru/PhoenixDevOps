@@ -156,6 +156,9 @@ STEP 1 の静的解析結果として、後続の専門エージェントがコ�
 | `module-dependencies.mmd` | モジュール間依存候補のMermaidグラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
 | `codebase-map.json` | 後続エージェントが再利用しやすい構造化JSON |
+| `database_schema_spec.md` | DB定義コードから生成したER図、データディクショナリ、リレーション・制約一覧 |
+| `single-source-of-truth.md` | インフラ/API/DB/ビジネスロジック解析結果を統合したシステム全体のSSOT仕様書 |
+| `api_specification.md` | ルーティング、コントローラー、バリデーションから抽出したAPI仕様書 |
 
 ## 7. 判断ルール
 
@@ -199,8 +202,9 @@ Cloud Functions の HTTP レスポンスは次の方針とする。
 | 機能内コンポーネント | 解析オーケストレーター | 解析ジョブの状態管理、各解析処理、成果物生成を制御する |
 | 機能内コンポーネント | ソースコード解析 | ソースコードを正として、実装ベースの仕様を抽出する |
 | 機能内コンポーネント | ドキュメント抽出 | 既存ドキュメントの記載内容を抽出する |
+| 機能内コンポーネント | API・インターフェース解析 | ルーティング、コントローラー、バリデーションからAPI仕様書を生成する |
 | 機能内コンポーネント | インフラ・IaC解析 | IaC 候補を正として、インフラ物理/論理構成仕様を生成する |
-| 機能内コンポーネント | 成果物生成 | 真の設計書、ドキュメント差分レポート、解析補助成果物を生成・保存する |
+| 機能内コンポーネント | 成果物生成 | 真の設計書、ドキュメント差分レポート、SSOT仕様書、個別解析成果物を生成・保存する |
 
 ### 9.2. 処理シーケンス
 
@@ -247,7 +251,7 @@ flowchart LR
         Queue["Cloud Tasks<br/>解析ジョブキュー"]
         Firestore["Firestore<br/>解析ジョブ状態"]
         Storage["Cloud Storage<br/>ソースコード群 / 既存ドキュメント群 / 生成成果物"]
-        Gemini["Gemini API<br/>ソースコード解析 / 差分比較 / インフラ構成仕様生成 / 成果物生成"]
+        Gemini["Gemini API<br/>ソースコード解析 / 個別仕様生成 / SSOT合成 / 差分比較 / 成果物生成"]
     end
 
     User -->|"ソースコード群<br/>既存ドキュメント群アップロード"| Browser
@@ -257,14 +261,14 @@ flowchart LR
     ApiFunction -->|"解析ジョブ登録"| Queue
     Queue -->|"非同期起動"| WorkerFunction
     WorkerFunction -->|"ソースコード群読み込み<br/>既存ドキュメント群読み込み"| Storage
-    WorkerFunction -->|"ソースコード解析<br/>差分比較<br/>インフラ構成仕様生成<br/>成果物生成"| Gemini
+    WorkerFunction -->|"ソースコード解析<br/>個別仕様生成<br/>SSOT合成<br/>差分比較<br/>成果物生成"| Gemini
     Gemini -->|"解析結果"| WorkerFunction
     WorkerFunction -->|"生成成果物保存"| Storage
     WorkerFunction -->|"状態更新"| Firestore
     Browser -->|"状態取得 / 成果物取得"| ApiFunction
     ApiFunction -->|"状態読み出し"| Firestore
     ApiFunction -->|"成果物URL返却"| Storage
-    ApiFunction -->|"真の設計書<br/>ドキュメント差分レポート<br/>インフラ物理/論理構成仕様"| Browser
+    ApiFunction -->|"SSOT仕様書<br/>真の設計書<br/>ドキュメント差分レポート<br/>個別仕様成果物"| Browser
     Browser -->|"表示 / ダウンロード"| User
 ```
 
@@ -275,7 +279,7 @@ flowchart LR
 | API実行基盤 | Cloud Functions | 解析ジョブ作成、状態取得、成果物取得APIの実行 |
 | 非同期実行 | Cloud Tasks | 解析ジョブのキューイング、解析ワーカーの起動、リトライ制御 |
 | ジョブ状態管理 | Firestore | `queued / running / succeeded / failed` の保存 |
-| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、インフラ構成仕様生成、成果物生成 |
+| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、個別仕様生成、SSOT合成、成果物生成 |
 | ファイル保管 | Cloud Storage | アップロードされたソースコード群、既存ドキュメント群、生成成果物の保存 |
 
 ### 10.2. 採用背景
@@ -330,12 +334,16 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 ### 11.4. Gemini 生成フェーズ
 
-現行ワーカーは、同一の Gemini client を使って次の prompt を実行する。
+現行ワーカーは、同一の Gemini client を使って次の9段階の prompt を実行する。
 
 | フェーズ | TASK | 役割 |
 | --- | --- | --- |
 | ソースコード解析 | `SOURCE_ANALYSIS` | 事前解析結果とソース抜粋から実装仕様を抽出する |
 | ドキュメント抽出 | `DOCUMENT_EXTRACTION` | 既存ドキュメント本文から仕様記述と根拠ドキュメントを抽出する |
+| DB・データモデル解析 | `DATABASE_SCHEMA_ANALYSIS` | DB定義コードからER図、データディクショナリ、リレーション・制約一覧を生成する |
+| ビジネスロジック解析 | `BUSINESS_LOGIC_ANALYSIS` | サービス層、ドメインモデル、ユースケースから業務フローと状態遷移を生成する |
+| SSOT合成 | `SSOT_SYNTHESIS` | インフラ/API/DB/ビジネスロジックの個別解析結果を統合し、コンポーネント図とデータフロー図を含むシステム全体仕様を生成する |
+| API・インターフェース解析 | `API_SPECIFICATION_ANALYSIS` | ルーティング、コントローラー、バリデーションから全APIエンドポイントを抽出しAPI仕様書を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
 | インフラ構成仕様生成 | `INFRASTRUCTURE_SPEC` | IaC 候補からインフラ物理/論理構成とセキュリティ設計を抽出する。IaC 候補がない場合は Gemini API を呼び出さずフォールバック成果物を生成する |
@@ -348,8 +356,12 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 | 成果物 | 保存名 | 種別 |
 | --- | --- | --- |
+| システム全体SSOT仕様書 | `single-source-of-truth.md` | Gemini 生成 |
 | 真の設計書 | `true-design.md` | Gemini 生成 |
 | ドキュメント差分レポート | `document-drift-report.md` | Gemini 生成 |
+| DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |
+| ビジネスロジック仕様書 | `business_logic_spec.md` | Gemini 生成 |
+| API仕様書 | `api_specification.md` | Gemini 生成 |
 | インフラ物理/論理構成仕様 | `infrastructure_spec.md` | Gemini 生成 |
 | コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 | モジュール依存グラフ | `module-dependencies.mmd` | 静的解析（デバッグ用中間成果物） |
@@ -362,9 +374,12 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 | 変数名 | 必須 | 既定値 | 用途 |
 | --- | --- | --- | --- |
-| `GEMINI_API_KEY` | 条件付き | なし | Gemini API キー。dry-run 無効時は必須 |
+| `GEMINI_API_KEY` | 条件付き | なし | Gemini API キー。Vertex AI (ADC) を使用しない場合かつ dry-run 無効時は必須 |
 | `GEMINI_MODEL` | 任意 | `gemini-3.1-flash-lite` | 使用する Gemini モデル |
 | `GEMINI_DRY_RUN` | 任意 | `false` | `true` / `1` / `yes` の場合は Gemini API を呼び出さない |
+| `GEMINI_USE_VERTEX_AI` / `GOOGLE_GENAI_USE_VERTEXAI` | 任意 | `true` | `true` / `1` / `yes` の場合は Vertex AI (ADC) 経由で Gemini を呼び出す |
+| `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT` / `GEMINI_PROJECT` | 条件付き | なし | Vertex AI 使用時の Google Cloud プロジェクト ID |
+| `GOOGLE_CLOUD_LOCATION` / `GCP_LOCATION` / `GEMINI_LOCATION` | 条件付き | `global` | Vertex AI 使用時の endpoint location |
 | `FIRESTORE_JOBS_COLLECTION` | 任意 | `jobs` | ジョブ状態保存先コレクション |
 | `RESULTS_BUCKET` | 任意 | なし | 成果物保存先 bucket。未指定時はソースと同じ bucket |
 | `RESULTS_PREFIX_TEMPLATE` | 任意 | `results/{job_id}` | 成果物保存先 prefix |

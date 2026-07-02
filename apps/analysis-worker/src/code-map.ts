@@ -96,9 +96,11 @@ const SOURCE_EXTENSIONS = new Set([
   ".jsx",
   ".kt",
   ".php",
+  ".prisma",
   ".py",
   ".rb",
   ".rs",
+  ".sql",
   ".swift",
   ".ts",
   ".tsx",
@@ -369,6 +371,9 @@ function classifyFile(filePath: string): string[] {
   if (path.extname(filePath).toLowerCase() === ".tf") {
     roles.push("iac");
   }
+  if (isDatabaseDefinitionPath(filePath)) {
+    roles.push("database_definition");
+  }
   if (roles.length === 0 && SOURCE_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
     roles.push("source");
   }
@@ -397,6 +402,7 @@ function languageFromPath(filePath: string): string {
     ".lock": "Lockfile",
     ".md": "Markdown",
     ".php": "PHP",
+    ".prisma": "Prisma",
     ".properties": "Properties",
     ".py": "Python",
     ".rb": "Ruby",
@@ -1092,16 +1098,44 @@ function collectDatabaseDefinitions(files: SourceFile[]): DbDefinition[] {
 
 function databaseDefinitionsFromContent(file: SourceFile): DbDefinition[] {
   const definitions: DbDefinition[] = [];
-  file.content.split(/\r?\n/).forEach((line, index) => {
+  const lines = file.content.split(/\r?\n/);
+  lines.forEach((line, index) => {
     const lineNumber = index + 1;
     const stripped = line.trim();
-    const sqlMatch = stripped.match(
-      /\b(CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+INDEX)\s+([^\s(]+)/i,
+
+    const createTableMatch = stripped.match(
+      /\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)/i,
     );
-    if (sqlMatch) {
+    if (createTableMatch) {
       definitions.push({
-        kind: sqlMatch[1].toUpperCase(),
-        name: sqlMatch[2],
+        kind: "CREATE TABLE",
+        name: cleanDbIdentifier(createTableMatch[1]),
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const alterTableMatch = stripped.match(
+      /\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?([`"[\]\w.]+)/i,
+    );
+    if (alterTableMatch) {
+      definitions.push({
+        kind: "ALTER TABLE",
+        name: cleanDbIdentifier(alterTableMatch[1]),
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const createIndexMatch = stripped.match(
+      /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)/i,
+    );
+    if (createIndexMatch) {
+      definitions.push({
+        kind: stripped.toUpperCase().includes("CREATE UNIQUE INDEX")
+          ? "CREATE UNIQUE INDEX"
+          : "CREATE INDEX",
+        name: cleanDbIdentifier(createIndexMatch[1]),
         path: file.path,
         line: String(lineNumber),
       });
@@ -1126,8 +1160,80 @@ function databaseDefinitionsFromContent(file: SourceFile): DbDefinition[] {
         line: String(lineNumber),
       });
     }
+
+    const typeOrmMatch = stripped.match(/^@(?:\w+\.)?Entity(?:\((.*)\))?/);
+    if (typeOrmMatch) {
+      const className = findNextClassName(lines, index);
+      const explicitName = typeOrmMatch[1]
+        ? typeOrmMatch[1].match(/["'`]([^"'`]+)["'`]/)?.[1]
+        : null;
+      definitions.push({
+        kind: "TypeORM entity",
+        name: explicitName || className || "(decorated entity)",
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const sqlalchemyTablenameMatch = stripped.match(
+      /^__tablename__\s*=\s*["'`]([^"'`]+)["'`]/,
+    );
+    if (sqlalchemyTablenameMatch) {
+      definitions.push({
+        kind: "SQLAlchemy table",
+        name: sqlalchemyTablenameMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const sequelizeDefineMatch = stripped.match(
+      /\b(?:sequelize|connection)\.define\(\s*["'`]([^"'`]+)["'`]/,
+    );
+    if (sequelizeDefineMatch) {
+      definitions.push({
+        kind: "Sequelize model",
+        name: sequelizeDefineMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const railsCreateTableMatch = stripped.match(/\bcreate_table\s+["']?:([\w.]+)/);
+    if (railsCreateTableMatch) {
+      definitions.push({
+        kind: "Rails create_table",
+        name: railsCreateTableMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
+
+    const railsAddIndexMatch = stripped.match(/\badd_index\s+["']?:([\w.]+)/);
+    if (railsAddIndexMatch) {
+      definitions.push({
+        kind: "Rails add_index",
+        name: railsAddIndexMatch[1],
+        path: file.path,
+        line: String(lineNumber),
+      });
+    }
   });
   return definitions;
+}
+
+function cleanDbIdentifier(value: string): string {
+  return value.replace(/^[`"[]+/, "").replace(/[`"\]]+$/, "").replace(/[,(;]+$/, "");
+}
+
+function findNextClassName(lines: string[], decoratorIndex: number): string | null {
+  for (let index = decoratorIndex + 1; index < Math.min(lines.length, decoratorIndex + 6); index += 1) {
+    const match = lines[index].trim().match(/^(?:export\s+)?class\s+(\w+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 function routeDict(method: string, routePath: string, filePath: string, lineNumber: number): Route {
@@ -1610,4 +1716,489 @@ function isAnalysisTarget(filePath: string): boolean {
     "tsconfig.json",
   ].includes(basename)) return false;
   return true;
+}
+
+const DATABASE_FILE_NAMES = new Set([
+  "schema.prisma",
+  "database.sql",
+  "schema.sql",
+  "structure.sql",
+  "ddl.sql",
+  "models.py",
+  "entities.ts",
+  "entity.ts",
+  "models.ts",
+  "database.ts",
+  "datasource.ts",
+  "data-source.ts",
+  "alembic.ini",
+]);
+
+const DATABASE_FILE_EXTENSIONS = new Set([".sql", ".prisma"]);
+
+const DATABASE_PATH_KEYWORDS = [
+  "migration",
+  "migrations",
+  "migrate",
+  "schema",
+  "ddl",
+  "database",
+  "db",
+  "model",
+  "models",
+  "entity",
+  "entities",
+  "prisma",
+  "typeorm",
+  "sqlalchemy",
+  "sequelize",
+  "alembic",
+];
+
+function isDatabaseDefinitionPath(filePath: string): boolean {
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const segments = normalized.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(normalized);
+  return (
+    DATABASE_FILE_NAMES.has(basename) ||
+    DATABASE_FILE_EXTENSIONS.has(extension) ||
+    segments.some((segment) => DATABASE_PATH_KEYWORDS.includes(segment))
+  );
+}
+
+function databasePathScore(filePath: string): number {
+  const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+  const segments = normalized.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(normalized);
+  let score = 0;
+  if (DATABASE_FILE_NAMES.has(basename)) score += 35;
+  if (DATABASE_FILE_EXTENSIONS.has(extension)) score += 30;
+  for (const keyword of DATABASE_PATH_KEYWORDS) {
+    if (segments.some((segment) => segment === keyword || segment.includes(keyword))) {
+      score += 8;
+    }
+  }
+  return score;
+}
+
+function hasDatabaseDefinitionSignal(file: SourceFile): boolean {
+  return databaseDefinitionsFromContent(file).length > 0;
+}
+
+/**
+ * CodebaseMap と生ファイルから DB・データモデル解析向けのファイルを特定する。
+ *
+ * 返却されるファイルは:
+ * 1. codebase-map.json の databaseDefinitions に出ているファイル
+ * 2. SQL/Prisma/ORM/migration らしいパスまたは内容を持つファイル
+ * 3. テストや生成物など解析対象外のファイルを除外したもの
+ */
+export function identifyDatabaseDefinitionFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 40,
+): SourceFile[] {
+  const definitionPaths = new Set(
+    codebaseMap.databaseDefinitions.map((definition) => definition.path),
+  );
+  const candidates = rawFiles.filter((file) => {
+    if (!isAnalysisTarget(file.path)) return false;
+    return (
+      definitionPaths.has(file.path) ||
+      isDatabaseDefinitionPath(file.path) ||
+      hasDatabaseDefinitionSignal(file)
+    );
+  });
+
+  const scored = candidates.map((file) => {
+    let score = 0;
+    if (definitionPaths.has(file.path)) score += 100;
+    if (hasDatabaseDefinitionSignal(file)) score += 60;
+    score += databasePathScore(file.path);
+    score += Math.min(file.content.split(/\r?\n/).length, 400) / 100;
+    return { file, score };
+  });
+
+  scored.sort((left, right) => {
+    const scoreDiff = right.score - left.score;
+    return scoreDiff !== 0 ? scoreDiff : left.file.path.localeCompare(right.file.path);
+  });
+
+  return scored.slice(0, maxFiles).map((item) => item.file);
+}
+
+/**
+ * ビジネスロジック関連キーワード。パス内にこれらが含まれるファイルを優先する。
+ */
+const BUSINESS_LOGIC_PATH_KEYWORDS = [
+  "service",
+  "domain",
+  "model",
+  "usecase",
+  "use-case",
+  "use_case",
+  "entity",
+  "handler",
+  "controller",
+  "resolver",
+  "command",
+  "query",
+  "saga",
+  "workflow",
+  "state",
+  "rule",
+  "policy",
+  "validator",
+  "interactor",
+  "aggregate",
+  "repository",
+  "logic",
+  "action",
+  "middleware",
+  "guard",
+  "pipe",
+  "strategy",
+];
+
+/**
+ * ビジネスロジック解析で除外するパスパターン。
+ */
+const BUSINESS_LOGIC_EXCLUDE_PATTERNS = [
+  "/node_modules/",
+  "/dist/",
+  "/build/",
+  "/.next/",
+  "/coverage/",
+  "/test/",
+  "/tests/",
+  "/__tests__/",
+  "/spec/",
+  "/e2e/",
+  "/fixtures/",
+  "/mocks/",
+  "/.storybook/",
+  "/storybook/",
+  "/stories/",
+  "/playwright/",
+  "/cypress/",
+  "/styles/",
+  "/assets/",
+  "/images/",
+  "/fonts/",
+  "/public/",
+  "/static/",
+  "/infra/",
+  "/terraform/",
+  "/cdk/",
+  "/cloudformation/",
+  "/.github/",
+  "/.vscode/",
+  "/generated/",
+  "/__generated__/",
+];
+
+/**
+ * UI層として除外するパスパターン。ビジネスロジック解析では優先度を下げる。
+ */
+const UI_LAYER_PATTERNS = [
+  "/components/",
+  "/pages/",
+  "/views/",
+  "/layouts/",
+  "/screens/",
+  "/templates/",
+  "/partials/",
+  "/widgets/",
+];
+
+/**
+ * CodebaseMap と生ファイルからビジネスロジック関連のファイルを特定し、
+ * 優先順位付けして返す。
+ *
+ * 返却されるファイルは:
+ * 1. ビジネスロジックキーワードを含むパスのファイル（高優先）
+ * 2. ソースコード拡張子を持ち、除外パターンに該当しないファイル（低優先）
+ *
+ * UI層ファイルは優先度を下げるが完全に除外はしない。
+ */
+export function identifyBusinessLogicFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 60,
+): SourceFile[] {
+  // 除外対象フィルタ
+  const isExcluded = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return BUSINESS_LOGIC_EXCLUDE_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // UI層判定
+  const isUiLayer = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return UI_LAYER_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // ビジネスロジックキーワードマッチ
+  const businessLogicScore = (filePath: string): number => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    const segments = normalized.split("/");
+    let score = 0;
+    for (const keyword of BUSINESS_LOGIC_PATH_KEYWORDS) {
+      if (segments.some((seg) => seg.includes(keyword))) {
+        score += 10;
+      }
+    }
+    // ファイル名自体にキーワードが含まれる場合はボーナス
+    const basename = segments.at(-1) ?? "";
+    for (const keyword of BUSINESS_LOGIC_PATH_KEYWORDS) {
+      if (basename.includes(keyword)) {
+        score += 5;
+      }
+    }
+    return score;
+  };
+
+  // ソースコードファイルかどうか
+  const isSourceCode = (filePath: string): boolean => {
+    const ext = path.extname(filePath).toLowerCase();
+    return SOURCE_EXTENSIONS.has(ext);
+  };
+
+  // フィルタリング
+  const candidates = rawFiles.filter((file) => {
+    if (!isSourceCode(file.path)) return false;
+    if (isExcluded(file.path)) return false;
+    if (isTestFile(file.path)) return false;
+    return true;
+  });
+
+  // スコアリングとソート
+  const scored = candidates.map((file) => {
+    let score = businessLogicScore(file.path);
+    if (isUiLayer(file.path)) {
+      score -= 20; // UI層は優先度を下げる
+    }
+    // ファイルサイズ（行数）が多いほうが重要なロジックが含まれる可能性
+    const lines = file.content.split("\n").length;
+    if (lines > 50) score += 2;
+    if (lines > 200) score += 3;
+    return { file, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxFiles).map((s) => s.file);
+}
+
+/**
+ * exported-symbols-*.md の内容を集約して1つのサマリー文字列を生成する。
+ */
+export function collectExportedSymbolsSummary(
+  artifacts: Record<string, string>,
+): string {
+  const symbolFiles = Object.entries(artifacts)
+    .filter(([name]) => name.startsWith("exported-symbols-"))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (symbolFiles.length === 0) {
+    return "エクスポートシンボル情報は利用できません。";
+  }
+
+  return symbolFiles
+    .map(([name, content]) => `### ${name}\n\n${content}`)
+    .join("\n\n---\n\n");
+}
+
+/**
+ * API・インターフェース解析のパスキーワード。
+ * コントローラー、ルーティング、ハンドラー、ミドルウェア、バリデーション関連を優先する。
+ */
+const API_RELATED_PATH_KEYWORDS = [
+  "controller",
+  "controllers",
+  "route",
+  "routes",
+  "router",
+  "routers",
+  "routing",
+  "handler",
+  "handlers",
+  "middleware",
+  "middlewares",
+  "validator",
+  "validators",
+  "validation",
+  "api",
+  "endpoint",
+  "endpoints",
+  "rest",
+  "graphql",
+  "grpc",
+  "schema",
+  "schemas",
+  "dto",
+  "dtos",
+  "request",
+  "response",
+  "serializer",
+  "serializers",
+  "interceptor",
+  "interceptors",
+  "filter",
+  "filters",
+  "guard",
+  "guards",
+  "pipe",
+  "pipes",
+  "decorator",
+  "decorators",
+  "openapi",
+  "swagger",
+];
+
+/**
+ * API解析で除外するパスパターン。
+ */
+const API_EXCLUDE_PATTERNS = [
+  "/node_modules/",
+  "/dist/",
+  "/build/",
+  "/.next/",
+  "/coverage/",
+  "/test/",
+  "/tests/",
+  "/__tests__/",
+  "/spec/",
+  "/e2e/",
+  "/fixtures/",
+  "/mocks/",
+  "/.storybook/",
+  "/storybook/",
+  "/stories/",
+  "/playwright/",
+  "/cypress/",
+  "/assets/",
+  "/images/",
+  "/fonts/",
+  "/public/",
+  "/static/",
+  "/infra/",
+  "/terraform/",
+  "/cdk/",
+  "/cloudformation/",
+  "/.github/",
+  "/.vscode/",
+  "/generated/",
+  "/__generated__/",
+];
+
+/**
+ * CodebaseMap と生ファイルから API・インターフェース関連のファイルを特定し、
+ * 優先順位付けして返す。
+ *
+ * 返却されるファイルは:
+ * 1. codebaseMap.apiRoutes で検出済みのルーティング定義ファイル（最高優先）
+ * 2. API関連キーワードを含むパスのファイル（高優先）
+ * 3. ソースコード拡張子を持ち、除外パターンに該当しないファイル（低優先）
+ */
+export function identifyApiRelatedFiles(
+  codebaseMap: CodebaseMap,
+  rawFiles: SourceFile[],
+  maxFiles: number = 60,
+): SourceFile[] {
+  // apiRoutes で検出済みのファイルパスを収集
+  const apiRoutePaths = new Set(
+    codebaseMap.apiRoutes.map((route) => {
+      // source は "path:lineNumber" 形式の場合がある
+      const colonIndex = route.source.lastIndexOf(":");
+      return colonIndex > 0 ? route.source.slice(0, colonIndex) : route.source;
+    }),
+  );
+
+  // 除外対象フィルタ
+  const isExcluded = (filePath: string): boolean => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    return API_EXCLUDE_PATTERNS.some((p) => normalized.includes(p));
+  };
+
+  // APIキーワードスコア
+  const apiKeywordScore = (filePath: string): number => {
+    const normalized = filePath.replaceAll("\\", "/").toLowerCase();
+    const segments = normalized.split("/");
+    let score = 0;
+    for (const keyword of API_RELATED_PATH_KEYWORDS) {
+      if (segments.some((seg) => seg.includes(keyword))) {
+        score += 10;
+      }
+    }
+    // ファイル名自体にキーワードが含まれる場合はボーナス
+    const basename = segments.at(-1) ?? "";
+    for (const keyword of API_RELATED_PATH_KEYWORDS) {
+      if (basename.includes(keyword)) {
+        score += 5;
+      }
+    }
+    return score;
+  };
+
+  // ソースコードファイルかどうか
+  const isSourceCode = (filePath: string): boolean => {
+    const ext = path.extname(filePath).toLowerCase();
+    return SOURCE_EXTENSIONS.has(ext);
+  };
+
+  // API関連コンテンツシグナル（ファイル内容からAPIパターンを検出）
+  const hasApiContentSignal = (file: SourceFile): boolean => {
+    const content = file.content;
+    // Express/Koa/Fastify 系
+    if (/\b(?:app|router)\.(get|post|put|delete|patch|options|head|all|use)\s*\(/.test(content)) return true;
+    // FastAPI / Flask 系
+    if (/@(?:\w+\.)?(?:app|router|api)\.(get|post|put|delete|patch)\s*\(/.test(content)) return true;
+    // Django
+    if (/\b(?:path|re_path|url)\s*\(/.test(content)) return true;
+    // Spring
+    if (/@(?:Get|Post|Put|Delete|Patch|Request)Mapping/.test(content)) return true;
+    // NestJS
+    if (/@(?:Get|Post|Put|Delete|Patch|Controller)\s*\(/.test(content)) return true;
+    // OpenAPI / Swagger annotations
+    if (/@(?:Api(?:Operation|Response|Param|Model)|swagger)/.test(content)) return true;
+    // バリデーション系
+    if (/\b(?:body|query|param|header)\s*\(/.test(content) && /\b(?:validate|validation|check|sanitize)\b/i.test(content)) return true;
+    return false;
+  };
+
+  // フィルタリング
+  const candidates = rawFiles.filter((file) => {
+    if (!isSourceCode(file.path)) return false;
+    if (isExcluded(file.path)) return false;
+    if (isTestFile(file.path)) return false;
+    return true;
+  });
+
+  // スコアリングとソート
+  const scored = candidates.map((file) => {
+    let score = 0;
+    // apiRoutes 検出済みファイルは最高優先
+    if (apiRoutePaths.has(file.path)) {
+      score += 200;
+    }
+    // パスキーワードスコア
+    score += apiKeywordScore(file.path);
+    // ファイル内容にAPIパターンが含まれる場合
+    if (hasApiContentSignal(file)) {
+      score += 50;
+    }
+    // ファイルサイズ（行数）が多いほうが重要なロジックが含まれる可能性
+    const lines = file.content.split("\n").length;
+    if (lines > 50) score += 2;
+    if (lines > 200) score += 3;
+    return { file, score };
+  });
+
+  // スコア0のファイルは除外（API関連でないため）
+  const relevant = scored.filter((s) => s.score > 0);
+
+  relevant.sort((a, b) => b.score - a.score);
+  return relevant.slice(0, maxFiles).map((s) => s.file);
 }

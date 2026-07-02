@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildCodebaseMap,
   codebaseMapArtifacts,
+  identifyDatabaseDefinitionFiles,
   renderIacStructureMarkdown,
   renderModuleDependenciesMermaid,
 } from "../src/code-map.js";
@@ -128,4 +129,47 @@ test("renderers produce backend artifacts for downstream agents", () => {
   assert.match(renderModuleDependenciesMermaid(codebaseMap), /src\/index\.ts/);
   assert.match(renderIacStructureMarkdown(codebaseMap), /storage/);
   assert.match(artifacts["codebase-map.json"], /"moduleDependencies"/);
+});
+
+test("buildCodebaseMap detects DB definitions across SQL and common ORM files", () => {
+  const rawFiles = [
+    {
+      path: "db/migrations/001_create_accounts.sql",
+      content: [
+        "CREATE TABLE accounts (id uuid primary key, email text not null);",
+        "CREATE UNIQUE INDEX idx_accounts_email ON accounts(email);",
+      ].join("\n"),
+    },
+    {
+      path: "prisma/schema.prisma",
+      content: "model Order {\n  id String @id\n}\n",
+    },
+    {
+      path: "src/entities/User.ts",
+      content: '@Entity("users")\nexport class User {}\n',
+    },
+    {
+      path: "app/models.py",
+      content: 'class Invoice(Base):\n    __tablename__ = "invoices"\n',
+    },
+    {
+      path: "db/migrate/20260101000000_create_payments.rb",
+      content: "create_table :payments do |t|\n  t.string :status\nend\n",
+    },
+  ];
+
+  const codebaseMap = buildCodebaseMap(rawFiles);
+
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "accounts"));
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "idx_accounts_email"));
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "Order"));
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "users"));
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "invoices"));
+  assert.ok(codebaseMap.databaseDefinitions.some((item) => item.name === "payments"));
+
+  const databaseFiles = identifyDatabaseDefinitionFiles(codebaseMap, rawFiles);
+  assert.deepEqual(
+    databaseFiles.map((file) => file.path).sort(),
+    rawFiles.map((file) => file.path).sort(),
+  );
 });

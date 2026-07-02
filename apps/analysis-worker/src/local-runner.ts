@@ -1,12 +1,19 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { loadLocalEnv } from "./local-env.js";
+loadLocalEnv();
+
 import { WorkerConfig } from "./config.js";
 import {
   GeminiDocumentExtractionEngine,
   GeminiDriftReportGenerator,
   GeminiSourceCodeAnalysisEngine,
   GeminiTrueDesignGenerator,
+  GeminiDatabaseSchemaAnalysisEngine,
+  GeminiBusinessLogicAnalysisEngine,
+  GeminiSsotSynthesisGenerator,
+  GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
 import { GeminiInfrastructureAgent } from "./infra.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
@@ -32,6 +39,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       apiKey: config.geminiApiKey,
       model: config.geminiModel,
       dryRun: args.dryRun || config.geminiDryRun,
+      useVertexAi: config.geminiUseVertexAi,
+      project: config.geminiProject,
+      location: config.geminiLocation,
     }),
   );
 
@@ -44,15 +54,22 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     resultsPrefix: jobId,
   });
 
+  const maxFiles = process.env.MAX_FILES ? parseInt(process.env.MAX_FILES, 10) : Infinity;
+  const maxCharsPerFile = process.env.MAX_CHARS_PER_FILE ? parseInt(process.env.MAX_CHARS_PER_FILE, 10) : Infinity;
+
   const orchestrator = new AnalysisOrchestrator({
     jobRepository: new InMemoryJobRepository(),
-    inputLoader: new LocalFileInputLoader(args.source, args.documents),
+    inputLoader: new LocalFileInputLoader(args.source, args.documents, { maxFiles, maxCharsPerFile }),
     artifactWriter: new LocalArtifactWriter(args.output),
     sourceCodeEngine: new GeminiSourceCodeAnalysisEngine(geminiClient),
     documentEngine: new GeminiDocumentExtractionEngine(geminiClient),
     trueDesignGenerator: new GeminiTrueDesignGenerator(geminiClient),
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
     infrastructureAgent: new GeminiInfrastructureAgent(geminiClient),
+    databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
+    businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
+    ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),
+    apiSpecificationEngine: new GeminiApiSpecificationAnalysisEngine(geminiClient),
   });
 
   const result = await orchestrator.run(payload);

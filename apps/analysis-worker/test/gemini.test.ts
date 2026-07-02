@@ -15,14 +15,91 @@ test("buildGeminiClient uses dry-run client only when explicitly enabled", () =>
   assert.ok(client instanceof DryRunGeminiClient);
 });
 
-test("buildGeminiClient requires GEMINI_API_KEY when dry-run is disabled", () => {
-  assert.throws(() => buildGeminiClient(new GeminiSettings({ dryRun: false })), {
+test("DryRunGeminiClient returns database schema analysis markdown", async () => {
+  const client = new DryRunGeminiClient();
+
+  const response = await client.generate(
+    [
+      "[TASK: DATABASE_SCHEMA_ANALYSIS]",
+      "",
+      "## STEP 1 成果物: コードベースマップ（codebase-map.json 抜粋）",
+      "",
+      '{"databaseDefinitions":[]}',
+      "",
+      "## DB関連ソースコード",
+      "",
+      "### prisma/schema.prisma",
+    ].join("\n"),
+  );
+
+  assert.match(response, /DB・データモデル仕様書（dry-run）/);
+  assert.match(response, /erDiagram/);
+});
+
+test("DryRunGeminiClient returns SSOT synthesis markdown with Mermaid diagrams", async () => {
+  const client = new DryRunGeminiClient();
+
+  const response = await client.generate(
+    [
+      "[TASK: SSOT_SYNTHESIS]",
+      "",
+      "## 個別解析結果: インフラ/IaC",
+      "",
+      "# IaC Structure Dump",
+      "",
+      "## 個別解析結果: API/インターフェース",
+      "",
+      "openapi: 3.0.0",
+      "",
+      "## 個別解析結果: DB・データモデル",
+      "",
+      "# DB・データモデル仕様書",
+      "",
+      "## 個別解析結果: ビジネスロジック・ユースケース",
+      "",
+      "# ビジネスロジック仕様書",
+      "",
+      "## ソースコード解析結果（補助根拠）",
+    ].join("\n"),
+  );
+
+  assert.match(response, /Single Source of Truth（dry-run）/);
+  assert.match(response, /flowchart LR/);
+  assert.match(response, /sequenceDiagram/);
+});
+
+test("buildGeminiClient uses Vertex AI client when project and location are configured", () => {
+  const client = buildGeminiClient(
+    new GeminiSettings({
+      apiKey: null,
+      dryRun: false,
+      project: "test-project",
+      location: "asia-northeast1",
+    }),
+  );
+
+  assert.ok(client instanceof GoogleGenAIClient);
+});
+
+test("buildGeminiClient requires project and location when Vertex AI is enabled", () => {
+  assert.throws(() => buildGeminiClient(new GeminiSettings({ apiKey: null, dryRun: false })), {
+    message: "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required when Vertex AI is enabled",
+  });
+});
+
+test("GeminiSettings defaults useVertexAi to true", () => {
+  const settings = new GeminiSettings();
+  assert.strictEqual(settings.useVertexAi, true);
+});
+
+test("buildGeminiClient requires GEMINI_API_KEY when dry-run is disabled and Vertex AI is disabled", () => {
+  assert.throws(() => buildGeminiClient(new GeminiSettings({ dryRun: false, useVertexAi: false })), {
     message: "GEMINI_API_KEY is required when dry-run is disabled",
   });
 });
 
 test("buildGeminiClient uses Google GenAI client when API key is configured", () => {
-  const client = buildGeminiClient(new GeminiSettings({ apiKey: "test-key", dryRun: false }));
+  const client = buildGeminiClient(new GeminiSettings({ apiKey: "test-key", dryRun: false, useVertexAi: false }));
 
   assert.ok(client instanceof GoogleGenAIClient);
 });

@@ -61,6 +61,8 @@ module "analysis_worker" {
   results_prefix_template       = var.analysis_worker_results_prefix_template
   gemini_model                  = var.analysis_worker_gemini_model
   gemini_dry_run                = var.analysis_worker_gemini_dry_run
+  gemini_use_vertex_ai          = var.analysis_worker_gemini_use_vertex_ai
+  gemini_location               = var.analysis_worker_gemini_location
   gemini_api_key_secret_id      = var.gemini_api_key_secret_id
   gemini_api_key_secret_version = var.gemini_api_key_secret_version
 }
