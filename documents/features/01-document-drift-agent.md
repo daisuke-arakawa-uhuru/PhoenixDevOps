@@ -11,10 +11,11 @@
 - 根拠を示せない内容は断定しない。
 - 解析できない箇所は「判断不能」として明示する。
 
-MVPでは、ユーザーがGit管理されていない生のソースコード群と、既存の古いドキュメント群を登録すると、次の2つを生成する。
+MVPでは、ユーザーがGit管理されていない生のソースコード群と、既存の古いドキュメント群を登録すると、次の成果物を生成する。
 
 - 真の設計書: 現在の実装を反映した仕様書
 - ドキュメント差分レポート: 既存ドキュメントとソースコードの差分をまとめたレポート
+- インフラ物理/論理構成仕様: IaC 候補からインフラ構成とセキュリティ設計を抽出した仕様書（詳細は [02-infra-iac-agent.md](02-infra-iac-agent.md)）
 
 ## 2. MVPで作る範囲
 
@@ -32,6 +33,7 @@ MVPでは、次の6機能を作る。
 | F-06 | 解析ジョブ管理 | `queued / running / succeeded / failed` の状態を管理する |
 
 `apps/analysis-worker` の現行実装では、F-02〜F-05 は軽量な事前抽出結果を Gemini API の prompt に渡して Markdown を生成する。F-06 は Cloud Tasks から HTTP POST で起動される Cloud Functions ワーカーとして実装する。
+Issue #31 のインフラ・IaC個別解析エージェントは、上記パイプラインに追加成果物 `infrastructure_spec.md` を組み込む。
 
 ### 2.2. MVPではやらないこと
 
@@ -63,7 +65,7 @@ MVPでは、次の6機能を作る。
 | --- | --- | --- |
 | ソースコード群 | 必須 | Git管理されていない生のソースコード一式。MVPではZIPファイルでのアップロードを主想定とする。現行ワーカーはZIP内のテキストファイル、または単体のテキストファイルを読み込める |
 | 既存ドキュメント群 | 必須 | ソースコードと乖離している可能性がある古い仕様書・設計書。PDF、Excel、ZIP内テキスト、Markdown、プレーンテキストを読み込み対象とする |
-| プロジェクト名 | 任意 | 生成される真の設計書、ドキュメント差分レポートのタイトルに使用する |
+| プロジェクト名 | 任意 | 生成される各成果物のタイトル・解析対象情報に使用する |
 
 既存ドキュメント群が未登録の場合はドキュメント差分を評価できないため、MVPの通常フローでは必須入力として扱う。
 
@@ -89,6 +91,7 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | 解析できない箇所 | 「判断不能」として成果物に出力する |
 
 現行ワーカーは、入力本文の Gemini prompt への詰め込み過ぎを避けるため、ソースコード・ドキュメントともに最大80ファイル、1ファイルあたり最大12,000文字を上限に読み込む。上限を超える内容は切り詰めた上で解析対象に含める。
+ただし `infrastructure_spec.md` 用の IaC 候補は、通常の `sourceFiles` とは別枠の `infrastructureFiles` として最大160ファイルまで抽出する。
 また、LLMに渡す前処理として、Cloud Functions 上で外部 CLI に依存しない軽量な静的構造マップを生成する。構造マップには、ディレクトリツリー、ファイルメタデータ、依存マニフェスト、JS/TS・Python・Go の import 依存候補、Terraform の provider/module/resource/data/variable/output 構造を含める。
 
 ## 6. 出力仕様
@@ -136,7 +139,14 @@ Cloud Tasks から `apps/analysis-worker` に渡す payload は、HTTP API 側�
 | 3. 分類定義 | 差分分類の説明 |
 | 4. 判断ルール | ソースコードを正とすること、推測を断定しないこと、根拠を明示すること |
 
-### 6.3. 解析補助成果物
+### 6.3. インフラ物理/論理構成仕様
+
+IaC 候補を正として、インフラの物理/論理構成とセキュリティ設計を生成する。
+
+成果物ファイル名は `infrastructure_spec.md` とする。
+詳細な対象ファイル・抽出項目・フォールバック動作は [02-infra-iac-agent.md](02-infra-iac-agent.md) を参照する。
+
+### 6.4. 解析補助成果物
 
 STEP 1 の静的解析結果として、後続の専門エージェントがコード探索で迷子にならないための補助成果物を生成する。これらは画面表示を前提にせず、バックエンド成果物として保存する。
 
@@ -164,7 +174,7 @@ STEP 1 の静的解析結果として、後続の専門エージェントがコ�
 | --- | --- |
 | queued | 解析ジョブが作成され、実行待ちの状態 |
 | running | ソースコード解析、ドキュメント抽出、成果物生成のいずれかを実行している状態 |
-| succeeded | 真の設計書、または真の設計書とドキュメント差分レポートの生成が完了した状態 |
+| succeeded | 解析成果物（真の設計書、ドキュメント差分レポート、インフラ物理/論理構成仕様）の生成が完了した状態 |
 | failed | 解析または成果物生成に失敗した状態 |
 
 `failed` の場合は、失敗理由をユーザーに表示する。ユーザーは失敗したジョブを再実行できる。
@@ -193,7 +203,8 @@ Cloud Functions の HTTP レスポンスは次の方針とする。
 | 機能内コンポーネント | ソースコード解析 | ソースコードを正として、実装ベースの仕様を抽出する |
 | 機能内コンポーネント | ドキュメント抽出 | 既存ドキュメントの記載内容を抽出する |
 | 機能内コンポーネント | API・インターフェース解析 | ルーティング、コントローラー、バリデーションからAPI仕様書を生成する |
-| 機能内コンポーネント | 成果物生成 | 真の設計書とドキュメント差分レポートを生成する |
+| 機能内コンポーネント | インフラ・IaC解析 | IaC 候補を正として、インフラ物理/論理構成仕様を生成する |
+| 機能内コンポーネント | 成果物生成 | 真の設計書、ドキュメント差分レポート、SSOT仕様書、個別解析成果物を生成・保存する |
 
 ### 9.2. 処理シーケンス
 
@@ -206,6 +217,7 @@ sequenceDiagram
         participant Orchestrator as 解析オーケストレーター
         participant Code as ソースコード解析
         participant Docs as ドキュメント抽出
+        participant Infra as インフラ・IaC解析
         participant Generator as 成果物生成
     end
 
@@ -217,8 +229,10 @@ sequenceDiagram
     Code-->>Orchestrator: 実装ベースの仕様情報を返却
     Orchestrator->>Docs: 既存ドキュメント抽出を依頼
     Docs-->>Orchestrator: 既存仕様の記載情報を返却
-    Orchestrator->>Generator: 仕様比較・成果物生成を依頼
-    Generator-->>Orchestrator: 成果物を返却
+    Orchestrator->>Generator: 真の設計書・差分レポート生成を依頼
+    Generator-->>Orchestrator: 真の設計書・差分レポートを返却
+    Orchestrator->>Infra: IaC 候補解析を依頼
+    Infra-->>Orchestrator: インフラ物理/論理構成仕様を返却
     Orchestrator->>Orchestrator: 解析ジョブを成功に更新（succeeded）
     Orchestrator-->>Input: 成果物を返却
     Input-->>User: 成果物を表示・ダウンロード可能にする
@@ -237,7 +251,7 @@ flowchart LR
         Queue["Cloud Tasks<br/>解析ジョブキュー"]
         Firestore["Firestore<br/>解析ジョブ状態"]
         Storage["Cloud Storage<br/>ソースコード群 / 既存ドキュメント群 / 生成成果物"]
-        Gemini["Gemini API<br/>ソースコード解析 / 差分比較 / 成果物生成"]
+        Gemini["Gemini API<br/>ソースコード解析 / 個別仕様生成 / SSOT合成 / 差分比較 / 成果物生成"]
     end
 
     User -->|"ソースコード群<br/>既存ドキュメント群アップロード"| Browser
@@ -247,14 +261,14 @@ flowchart LR
     ApiFunction -->|"解析ジョブ登録"| Queue
     Queue -->|"非同期起動"| WorkerFunction
     WorkerFunction -->|"ソースコード群読み込み<br/>既存ドキュメント群読み込み"| Storage
-    WorkerFunction -->|"ソースコード解析<br/>差分比較<br/>成果物生成"| Gemini
+    WorkerFunction -->|"ソースコード解析<br/>個別仕様生成<br/>SSOT合成<br/>差分比較<br/>成果物生成"| Gemini
     Gemini -->|"解析結果"| WorkerFunction
     WorkerFunction -->|"生成成果物保存"| Storage
     WorkerFunction -->|"状態更新"| Firestore
     Browser -->|"状態取得 / 成果物取得"| ApiFunction
     ApiFunction -->|"状態読み出し"| Firestore
     ApiFunction -->|"成果物URL返却"| Storage
-    ApiFunction -->|"真の設計書<br/>ドキュメント差分レポート"| Browser
+    ApiFunction -->|"SSOT仕様書<br/>真の設計書<br/>ドキュメント差分レポート<br/>個別仕様成果物"| Browser
     Browser -->|"表示 / ダウンロード"| User
 ```
 
@@ -265,7 +279,7 @@ flowchart LR
 | API実行基盤 | Cloud Functions | 解析ジョブ作成、状態取得、成果物取得APIの実行 |
 | 非同期実行 | Cloud Tasks | 解析ジョブのキューイング、解析ワーカーの起動、リトライ制御 |
 | ジョブ状態管理 | Firestore | `queued / running / succeeded / failed` の保存 |
-| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、成果物生成 |
+| AI技術 | Gemini API | ソースコード解析、ドキュメント抽出、個別仕様生成、SSOT合成、成果物生成 |
 | ファイル保管 | Cloud Storage | アップロードされたソースコード群、既存ドキュメント群、生成成果物の保存 |
 
 ### 10.2. 採用背景
@@ -316,11 +330,11 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 
 この事前解析は仕様確定ではなく、Gemini prompt に渡す根拠候補である。最終成果物ではソースコードを正としつつ、根拠が不足する内容は推測または判断不能として扱う。
 
-事前解析の結果は、Gemini prompt への埋め込みに加え、デバッグ用中間成果物 `codebase-map.md` として Cloud Storage に保存する。
+事前解析の結果は、Gemini prompt への埋め込みに加え、`codebase-map.md`、`module-dependencies.mmd`、`iac-structure.md`、`codebase-map.json` として Cloud Storage に保存する。
 
 ### 11.4. Gemini 生成フェーズ
 
-現行ワーカーは、同一の Gemini client を使って次の7段階の prompt を実行する。
+現行ワーカーは、同一の Gemini client を使って次の9段階の prompt を実行する。
 
 | フェーズ | TASK | 役割 |
 | --- | --- | --- |
@@ -332,6 +346,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | API・インターフェース解析 | `API_SPECIFICATION_ANALYSIS` | ルーティング、コントローラー、バリデーションから全APIエンドポイントを抽出しAPI仕様書を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
+| インフラ構成仕様生成 | `INFRASTRUCTURE_SPEC` | IaC 候補からインフラ物理/論理構成とセキュリティ設計を抽出する。IaC 候補がない場合は Gemini API を呼び出さずフォールバック成果物を生成する |
 
 既定モデルは `gemini-3.1-flash-lite` とする。`GEMINI_DRY_RUN` が有効な場合は Gemini API を呼び出さず、prompt 接続と成果物保存経路の確認用 Markdown を生成する。
 
@@ -347,7 +362,11 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |
 | ビジネスロジック仕様書 | `business_logic_spec.md` | Gemini 生成 |
 | API仕様書 | `api_specification.md` | Gemini 生成 |
+| インフラ物理/論理構成仕様 | `infrastructure_spec.md` | Gemini 生成 |
 | コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
+| モジュール依存グラフ | `module-dependencies.mmd` | 静的解析（デバッグ用中間成果物） |
+| IaC構造ダンプ | `iac-structure.md` | 静的解析（デバッグ用中間成果物） |
+| コードベースマップJSON | `codebase-map.json` | 静的解析（後続エージェント向け構造化成果物） |
 
 保存先 bucket は `RESULTS_BUCKET` が指定されていればその bucket、未指定ならソースアーカイブと同じ bucket を使う。保存先 prefix は payload の `resultsPrefix` を優先し、未指定時は `RESULTS_PREFIX_TEMPLATE` の `{job_id}` を置換する。既定値は `results/{job_id}`。
 

@@ -15,6 +15,7 @@ import {
   GeminiSsotSynthesisGenerator,
   GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
+import { GeminiInfrastructureAgent } from "./infra.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
@@ -64,6 +65,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     documentEngine: new GeminiDocumentExtractionEngine(geminiClient),
     trueDesignGenerator: new GeminiTrueDesignGenerator(geminiClient),
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
+    infrastructureAgent: new GeminiInfrastructureAgent(geminiClient),
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
     ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),

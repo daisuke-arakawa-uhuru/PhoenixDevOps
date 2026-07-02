@@ -8,6 +8,7 @@ import {
   GeminiSsotSynthesisGenerator,
   GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
+import { GeminiInfrastructureAgent } from "./infra.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
 import { FirestoreJobRepository } from "./repositories.js";
@@ -37,6 +38,7 @@ export function buildOrchestrator(config: WorkerConfig): AnalysisOrchestrator {
     documentEngine: new GeminiDocumentExtractionEngine(geminiClient),
     trueDesignGenerator: new GeminiTrueDesignGenerator(geminiClient),
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
+    infrastructureAgent: new GeminiInfrastructureAgent(geminiClient),
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
     ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),

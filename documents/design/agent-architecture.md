@@ -40,7 +40,7 @@ graph TD
         DBA --> Syn
         APIA --> Syn
         BLA --> Syn
-        
+
         Syn -->|真実の仕様書| Gap[6. 差分解析エージェント]
         Vec -->|古いドキュメント| Gap
         Live -->|現在の実設定| Gap

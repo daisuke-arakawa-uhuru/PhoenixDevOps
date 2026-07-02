@@ -163,6 +163,21 @@ export class DryRunGeminiClient implements GeminiClient {
         truncate(documentOverview, 3000),
       ].join("\n");
     }
+    if (prompt.includes("[TASK: INFRASTRUCTURE_SPEC]")) {
+      const iacOverview = extractPromptSection(
+        prompt,
+        "## 事前抽出済みのIaC構造情報",
+        "## IaC入力ファイル抜粋",
+      );
+      return [
+        "## インフラ構成抽出結果（dry-run）",
+        "",
+        "- Gemini API は呼び出していません。",
+        "- 事前抽出済みの IaC 構造情報と prompt 構造の確認用レスポンスです。",
+        "",
+        truncate(iacOverview, 3000),
+      ].join("\n");
+    }
     if (prompt.includes("[TASK: TRUE_DESIGN]")) {
       const sourceSummary = extractPromptSection(prompt, "## ソースコード解析結果", "## ドキュメント抽出結果");
       return [

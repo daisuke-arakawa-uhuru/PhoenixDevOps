@@ -11,6 +11,7 @@ import {
   ExtractionResult,
   SsotSynthesisGenerator,
 } from "./engines.js";
+import { InfrastructureAgent } from "./infra.js";
 import type { SynthesisComponentSpecifications } from "./prompts.js";
 
 export class WorkerResult {
@@ -57,6 +58,7 @@ export class AnalysisOrchestrator {
   private documentEngine: AnalysisEngine;
   private trueDesignGenerator: DesignGenerator;
   private driftReportGenerator: DesignGenerator;
+  private infrastructureAgent: InfrastructureAgent | null;
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
   private apiSpecificationEngine: ApiSpecificationEngine | null;
@@ -70,6 +72,7 @@ export class AnalysisOrchestrator {
     documentEngine,
     trueDesignGenerator,
     driftReportGenerator,
+    infrastructureAgent = null,
     databaseSchemaEngine = null,
     businessLogicEngine = null,
     apiSpecificationEngine = null,
@@ -82,6 +85,7 @@ export class AnalysisOrchestrator {
     documentEngine: AnalysisEngine;
     trueDesignGenerator: DesignGenerator;
     driftReportGenerator: DesignGenerator;
+    infrastructureAgent?: InfrastructureAgent | null;
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
     apiSpecificationEngine?: ApiSpecificationEngine | null;
@@ -94,6 +98,7 @@ export class AnalysisOrchestrator {
     this.documentEngine = documentEngine;
     this.trueDesignGenerator = trueDesignGenerator;
     this.driftReportGenerator = driftReportGenerator;
+    this.infrastructureAgent = infrastructureAgent;
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
     this.apiSpecificationEngine = apiSpecificationEngine;
@@ -147,8 +152,15 @@ export class AnalysisOrchestrator {
         );
       }
 
+      let infrastructureSpecMarkdown: string | null = null;
+      if (this.infrastructureAgent) {
+        infrastructureSpecMarkdown = await this.infrastructureAgent.analyze(payload, inputs);
+      }
+
       const componentSpecifications = buildSynthesisComponentSpecifications(
         sourceSpecification,
+        infrastructureSpecMarkdown,
+        apiSpecificationMarkdown,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
       );
@@ -180,12 +192,16 @@ export class AnalysisOrchestrator {
         businessLogicSpecMarkdown,
         apiSpecificationMarkdown,
       });
+      const files: Record<string, string> = artifacts.asFiles();
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
         ...(documentSpecification.debugArtifacts ?? {}),
       };
+      if (infrastructureSpecMarkdown) {
+        files["infrastructure_spec.md"] = infrastructureSpecMarkdown;
+      }
       const artifactPaths = await this.artifactWriter.write(payload, {
-        ...artifacts.asFiles(),
+        ...files,
         ...debugFiles,
       });
       await this.jobRepository.markSucceeded(payload.jobId, artifactPaths);
@@ -206,20 +222,34 @@ export class AnalysisOrchestrator {
 
 function buildSynthesisComponentSpecifications(
   sourceSpecification: ExtractionResult,
+  infrastructureSpecMarkdown: string | null,
+  apiSpecificationMarkdown: string | null,
   databaseSchemaSpecMarkdown: string | null,
   businessLogicSpecMarkdown: string | null,
 ): SynthesisComponentSpecifications {
   const artifacts = sourceSpecification.artifacts ?? {};
   return {
-    infrastructureSpecMarkdown: firstArtifactContent(artifacts, [
-      "infrastructure_spec.md",
-      "infrastructure-spec.md",
-      "iac-structure.md",
-    ]),
-    apiSpecMarkdown: collectApiSpecMarkdown(artifacts),
+    infrastructureSpecMarkdown: firstNonEmpty(
+      infrastructureSpecMarkdown,
+      firstArtifactContent(artifacts, [
+        "infrastructure_spec.md",
+        "infrastructure-spec.md",
+        "iac-structure.md",
+      ]),
+    ),
+    apiSpecMarkdown: firstNonEmpty(apiSpecificationMarkdown, collectApiSpecMarkdown(artifacts)),
     databaseSchemaSpecMarkdown,
     businessLogicSpecMarkdown,
   };
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (value && value.trim()) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function firstArtifactContent(

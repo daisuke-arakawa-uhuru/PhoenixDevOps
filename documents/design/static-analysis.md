@@ -46,7 +46,7 @@ JavaScript/TypeScript、Python、Go のコード内にある相対パスによ�
 
 ### ⑥ IaC（Infrastructure as Code）構造の抽出 (`collectIacStructure`)
 Terraform ファイル (`.tf`) をパースし、インフラリソースブロック構造を抽出する。
-* **対象ブロック**: `provider`, `module`, `resource`, `data`, `variable`, `output`, `locals` 
+* **対象ブロック**: `provider`, `module`, `resource`, `data`, `variable`, `output`, `locals`
 
 ### ⑦ サービス境界とエクスポートシンボルの分類 (`detectServiceBoundaries` / `buildExportedSymbolsByService`)
 * ファイルパスの構造（`services/*` や `infra/*`）からマイクロサービス等のサービス境界を自動検出する。

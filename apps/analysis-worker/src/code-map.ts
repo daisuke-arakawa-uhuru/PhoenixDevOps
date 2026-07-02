@@ -1659,7 +1659,7 @@ export function buildExportedSymbolsByService(
       ...symbols.map((s) => `| ${s.kind} | \`${s.name}\` | ${s.file} |`),
       "",
     ].join("\n");
-    
+
     result[svcName] = md;
   }
 
@@ -1677,7 +1677,7 @@ export function buildExportedSymbolsByService(
       ...ungrouped.map((s) => `| ${s.kind} | \`${s.name}\` | ${s.file} |`),
       "",
     ].join("\n");
-    
+
     result["ungrouped"] = md;
   }
 

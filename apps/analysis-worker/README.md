@@ -9,8 +9,9 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 - `src/repositories.js`: Firestore のジョブ状態管理境界
 - `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
-- `src/engines.js`: F-02/F-03/F-04/F-05 と SSOT 合成の解析・生成フェーズ境界
+- `src/engines.js`: F-02/F-03/F-04/F-05、DB/API/ビジネスロジック個別解析、SSOT 合成の解析・生成フェーズ境界
 - `src/code-map.js`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
+- `src/infra.js`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補と STEP 1 静的解析成果物を抽出し Gemini で `infrastructure_spec.md` を生成
 - `src/prompts.js`: Gemini に渡す prompt 生成
 - `src/local-runner.js`: ローカル実行用 CLI
 
@@ -145,10 +146,12 @@ npm run local -- \
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
 | `database_schema_spec.md` | DB・データモデル仕様書（ER図、データディクショナリ、リレーション・制約一覧） |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
+| `api_specification.md` | API仕様書（エンドポイント、リクエスト/レスポンス、バリデーション、認証認可） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
 | `codebase-map.json` | 後続エージェントが再利用しやすい構造化 JSON |
+| `infrastructure_spec.md` | Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補から逆算したインフラ物理/論理構成・セキュリティ設計（Issue #31） |
 
 ## 環境変数
 
@@ -205,7 +208,7 @@ gcloud functions deploy analysis-worker \
   --set-env-vars FIRESTORE_JOBS_COLLECTION=jobs,RESULTS_PREFIX_TEMPLATE=results/{job_id},GEMINI_MODEL=gemini-3.1-flash-lite,GEMINI_DRY_RUN=false,GEMINI_USE_VERTEX_AI=true,GEMINI_LOCATION=global
 ```
 
-現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
+現時点では Gemini prompt と呼び出し口、入力本文取得、軽量な事前構造解析までの実装です。静的解析は Cloud Functions 上で外部 CLI に依存しない実装とし、依存マップは Mermaid、IaC は Markdown/JSON の構造ダンプとして保存します。インフラ・IaC個別解析エージェント（`src/infra.js`）は通常のソース解析用 `sourceFiles` とは別枠の `infrastructureFiles` として IaC 候補を抽出します。Terraform の provider/resource/data/module/variable/output/backend、docker-compose のサービス、Kubernetes マニフェスト、Dockerfile の `EXPOSE` を静的抽出し、AWS CDK / CloudFormation 候補と STEP 1 静的解析成果物（`codebase-map.json` / `exported-symbols-*.md`）は補助入力として Gemini に渡します。IaC 候補がない場合は Gemini API を呼び出さず、フォールバックの `infrastructure_spec.md` を出力します。PDF は `pdf-parse`、Excel は xlsx 内 XML の軽量抽出、ZIP は標準ライブラリベースの読み取りで扱います。
 
 ## DB・データモデル解析（STEP 2-②）
 
@@ -238,6 +241,22 @@ STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`�
 | ファイル | 内容 |
 | --- | --- |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |
+
+## API・インターフェース解析（STEP 2-③）
+
+STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`）と、ルーティング、コントローラー、バリデーション、OpenAPI 候補を含むソースコードを入力として、API・インターフェースの個別解析を行います。
+
+### 解析内容
+
+- ルーティング、コントローラー、DTO/バリデーション定義から API 関連ファイルを自動特定
+- Gemini API でエンドポイント、入出力、認証認可、バリデーション、エラーハンドリングを解析・言語化
+- 既存の OpenAPI / Swagger 断片があれば補助根拠として取り込み、Markdown 形式の API 仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `api_specification.md` | API仕様書（エンドポイント一覧、リクエスト/レスポンス、バリデーション、認証認可、エラー応答） |
 
 ## SSOT合成（STEP 3）
 

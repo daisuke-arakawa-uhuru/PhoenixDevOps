@@ -3,6 +3,7 @@ import { AnalysisTaskPayload } from "./payload.js";
 export interface AnalysisInput {
   sourceArchiveUri: string;
   sourceFiles: Array<{ path: string; content: string }>;
+  infrastructureFiles?: Array<{ path: string; content: string }>;
   documentUris: string[];
   documentFiles: Array<{ path: string; content: string }>;
   allSourceFiles?: Array<{ path: string; content: string }>;
