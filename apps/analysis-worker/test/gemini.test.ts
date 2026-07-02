@@ -36,6 +36,38 @@ test("DryRunGeminiClient returns database schema analysis markdown", async () =>
   assert.match(response, /erDiagram/);
 });
 
+test("DryRunGeminiClient returns SSOT synthesis markdown with Mermaid diagrams", async () => {
+  const client = new DryRunGeminiClient();
+
+  const response = await client.generate(
+    [
+      "[TASK: SSOT_SYNTHESIS]",
+      "",
+      "## 個別解析結果: インフラ/IaC",
+      "",
+      "# IaC Structure Dump",
+      "",
+      "## 個別解析結果: API/インターフェース",
+      "",
+      "openapi: 3.0.0",
+      "",
+      "## 個別解析結果: DB・データモデル",
+      "",
+      "# DB・データモデル仕様書",
+      "",
+      "## 個別解析結果: ビジネスロジック・ユースケース",
+      "",
+      "# ビジネスロジック仕様書",
+      "",
+      "## ソースコード解析結果（補助根拠）",
+    ].join("\n"),
+  );
+
+  assert.match(response, /Single Source of Truth（dry-run）/);
+  assert.match(response, /flowchart LR/);
+  assert.match(response, /sequenceDiagram/);
+});
+
 test("buildGeminiClient uses Vertex AI client when project and location are configured", () => {
   const client = buildGeminiClient(
     new GeminiSettings({

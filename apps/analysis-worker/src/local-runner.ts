@@ -12,6 +12,7 @@ import {
   GeminiTrueDesignGenerator,
   GeminiDatabaseSchemaAnalysisEngine,
   GeminiBusinessLogicAnalysisEngine,
+  GeminiSsotSynthesisGenerator,
   GeminiApiSpecificationAnalysisEngine,
 } from "./engines.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
@@ -65,6 +66,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
     databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
     businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
+    ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),
     apiSpecificationEngine: new GeminiApiSpecificationAnalysisEngine(geminiClient),
   });
 
