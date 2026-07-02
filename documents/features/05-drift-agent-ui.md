@@ -168,6 +168,11 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
   }
   ```
 
+* **状態復元**:
+  * UI は解析開始時の `jobId`、`projectName`、開始時刻をブラウザの `localStorage` に保存する。
+  * ページ再読み込み時は保存済み `jobId` を使って `GET /jobs/{jobId}` を再取得し、`succeeded` なら結果画面、`queued` / `running` / `failed` なら進捗画面に復元する。
+  * 復元できた場合は画面上部に通知を表示してもよい。
+
 ### 4.3. 成果物URLの取得とプレビュー表示
 ジョブが `succeeded` になった後、UIは署名付きURLを取得してコンテンツを読み込む。
 
