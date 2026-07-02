@@ -7,6 +7,9 @@ import {
   GeminiDriftReportGenerator,
   GeminiSourceCodeAnalysisEngine,
   GeminiTrueDesignGenerator,
+  GeminiDatabaseSchemaAnalysisEngine,
+  GeminiBusinessLogicAnalysisEngine,
+  GeminiSsotSynthesisGenerator,
 } from "./engines.js";
 import { GeminiInfrastructureAgent } from "./infra.js";
 import { buildGeminiClient, GeminiSettings } from "./gemini.js";
@@ -14,6 +17,7 @@ import { AnalysisOrchestrator } from "./orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "./payload.js";
 import { InMemoryJobRepository } from "./repositories.js";
 import { LocalArtifactWriter, LocalFileInputLoader } from "./storage.js";
+import { loadLocalEnv } from "./local-env.js";
 
 interface Args {
   source: string;
@@ -26,12 +30,16 @@ interface Args {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
+  loadLocalEnv();
   const config = WorkerConfig.fromEnv(process.env);
   const geminiClient = buildGeminiClient(
     new GeminiSettings({
       apiKey: config.geminiApiKey,
       model: config.geminiModel,
       dryRun: args.dryRun || config.geminiDryRun,
+      useVertexAi: config.geminiUseVertexAi,
+      project: config.geminiProject,
+      location: config.geminiLocation,
     }),
   );
 
@@ -53,6 +61,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     trueDesignGenerator: new GeminiTrueDesignGenerator(geminiClient),
     driftReportGenerator: new GeminiDriftReportGenerator(geminiClient),
     infrastructureAgent: new GeminiInfrastructureAgent(geminiClient),
+    databaseSchemaEngine: new GeminiDatabaseSchemaAnalysisEngine(geminiClient),
+    businessLogicEngine: new GeminiBusinessLogicAnalysisEngine(geminiClient),
+    ssotSynthesisGenerator: new GeminiSsotSynthesisGenerator(geminiClient),
   });
 
   const result = await orchestrator.run(payload);

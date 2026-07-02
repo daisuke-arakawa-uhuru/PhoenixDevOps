@@ -231,6 +231,18 @@ variable "analysis_worker_gemini_dry_run" {
   default     = false
 }
 
+variable "analysis_worker_gemini_use_vertex_ai" {
+  description = "true の場合、解析ワーカーは Gemini API の呼び出しに Vertex AI (ADC) を使用する"
+  type        = bool
+  default     = true
+}
+
+variable "analysis_worker_gemini_location" {
+  description = "解析ワーカーが使用する Vertex AI Gemini endpoint location"
+  type        = string
+  default     = "global"
+}
+
 variable "gemini_api_key_secret_id" {
   description = "GEMINI_API_KEY として参照する Secret Manager secret ID。secret 実値は Terraform に渡さない。"
   type        = string

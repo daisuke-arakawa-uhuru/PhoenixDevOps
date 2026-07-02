@@ -4,19 +4,31 @@ export class GeminiSettings {
   apiKey: string | null;
   model: string;
   dryRun: boolean;
+  useVertexAi: boolean;
+  project: string | null;
+  location: string | null;
 
   constructor({
     apiKey = null,
     model = "gemini-3.1-flash-lite",
     dryRun = false,
+    useVertexAi,
+    project = null,
+    location = null,
   }: {
     apiKey?: string | null;
     model?: string;
     dryRun?: boolean;
+    useVertexAi?: boolean;
+    project?: string | null;
+    location?: string | null;
   } = {}) {
     this.apiKey = apiKey;
     this.model = model;
     this.dryRun = dryRun;
+    this.useVertexAi = useVertexAi !== undefined ? useVertexAi : true;
+    this.project = project;
+    this.location = location;
   }
 }
 
@@ -30,10 +42,21 @@ export class GoogleGenAIClient implements GeminiClient {
   private maxRetries: number;
 
   constructor(settings: GeminiSettings) {
-    if (!settings.apiKey) {
-      throw new Error("GEMINI_API_KEY is required when dry-run is disabled");
+    if (settings.useVertexAi) {
+      if (!settings.project || !settings.location) {
+        throw new Error("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required when Vertex AI is enabled");
+      }
+      this.client = new GoogleGenAI({
+        vertexai: true,
+        project: settings.project,
+        location: settings.location,
+      });
+    } else {
+      if (!settings.apiKey) {
+        throw new Error("GEMINI_API_KEY is required when dry-run is disabled");
+      }
+      this.client = new GoogleGenAI({ apiKey: settings.apiKey });
     }
-    this.client = new GoogleGenAI({ apiKey: settings.apiKey });
     this.model = settings.model;
     this.maxRetries = 2;
   }
@@ -193,6 +216,181 @@ export class DryRunGeminiClient implements GeminiClient {
         "### ドキュメント抽出結果",
         "",
         truncate(documentSummary, 2500),
+      ].join("\n");
+    }
+    if (prompt.includes("[TASK: SSOT_SYNTHESIS]")) {
+      const infrastructureSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: インフラ/IaC",
+        "## 個別解析結果: API/インターフェース",
+      );
+      const apiSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: API/インターフェース",
+        "## 個別解析結果: DB・データモデル",
+      );
+      const databaseSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: DB・データモデル",
+        "## 個別解析結果: ビジネスロジック・ユースケース",
+      );
+      const businessLogicSpec = extractPromptSection(
+        prompt,
+        "## 個別解析結果: ビジネスロジック・ユースケース",
+        "## ソースコード解析結果（補助根拠）",
+      );
+      return [
+        "# Single Source of Truth（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、SSOT合成フェーズの接続だけを確認しています。",
+        "",
+        "## システムコンポーネント図",
+        "",
+        "```mermaid",
+        "flowchart LR",
+        "    Client[Client] --> API[API]",
+        "    API --> Logic[Business Logic]",
+        "    Logic --> DB[(Database)]",
+        "    API --> Infra[Runtime Infrastructure]",
+        "```",
+        "",
+        "## データフロー図",
+        "",
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant User as ユーザー",
+        "    participant API as API",
+        "    participant Logic as ビジネスロジック",
+        "    participant DB as DB",
+        "    User->>API: (dry-run) リクエスト",
+        "    API->>Logic: 入力検証とユースケース呼び出し",
+        "    Logic->>DB: 参照/更新",
+        "    DB-->>Logic: 結果",
+        "    Logic-->>API: レスポンス生成",
+        "    API-->>User: (dry-run) レスポンス",
+        "```",
+        "",
+        "## 入力サマリー",
+        "",
+        "### インフラ/IaC",
+        "",
+        truncate(infrastructureSpec, 1200),
+        "",
+        "### API/インターフェース",
+        "",
+        truncate(apiSpec, 1200),
+        "",
+        "### DB・データモデル",
+        "",
+        truncate(databaseSpec, 1200),
+        "",
+        "### ビジネスロジック",
+        "",
+        truncate(businessLogicSpec, 1200),
+      ].join("\n");
+    }
+    if (prompt.includes("[TASK: DATABASE_SCHEMA_ANALYSIS]")) {
+      const codebaseMapSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: コードベースマップ（codebase-map.json 抜粋）",
+        "## DB関連ソースコード",
+      );
+      const databaseSourceSection = extractPromptSection(
+        prompt,
+        "## DB関連ソースコード",
+        "__END_OF_DATABASE_SCHEMA_PROMPT__",
+      );
+      return [
+        "# DB・データモデル仕様書（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、DB・データモデル解析フェーズの接続だけを確認しています。",
+        "",
+        "## 解析対象サマリー",
+        "",
+        "- dry-run のため実際の解析は行っていません。",
+        "",
+        "## ER図",
+        "",
+        "```mermaid",
+        "erDiagram",
+        "    DRY_RUN_ENTITY {",
+        "        string id",
+        "    }",
+        "```",
+        "",
+        "## テーブル一覧",
+        "",
+        "| テーブル/モデル | 概要 | 主キー | 根拠ファイル |",
+        "| --- | --- | --- | --- |",
+        "| DRY_RUN_ENTITY | DB解析フェーズの接続確認 | id | - |",
+        "",
+        "## 入力サマリー",
+        "",
+        "### コードベースマップ",
+        "",
+        truncate(codebaseMapSection, 2000),
+        "",
+        "### DB関連ソースコード",
+        "",
+        truncate(databaseSourceSection, 2000),
+      ].join("\n");
+    }
+    if (prompt.includes("[TASK: BUSINESS_LOGIC_ANALYSIS]")) {
+      const codebaseMapSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: コードベースマップ（codebase-map.json）",
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+      );
+      const exportedSymbolsSection = extractPromptSection(
+        prompt,
+        "## STEP 1 成果物: エクスポートシンボル一覧",
+        "## ビジネスロジック関連ソースコード",
+      );
+      return [
+        "# ビジネスロジック仕様書（dry-run）",
+        "",
+        "この成果物はローカル動作確認用です。",
+        "Gemini API を呼び出さず、ビジネスロジック解析フェーズの接続だけを確認しています。",
+        "",
+        "## 解析対象サマリー",
+        "",
+        "- dry-run のため実際の解析は行っていません。",
+        "",
+        "## 機能一覧",
+        "",
+        "| 機能名 | 概要 | 対象サービス | 根拠ファイル |",
+        "| --- | --- | --- | --- |",
+        "| (dry-run) | ビジネスロジック解析フェーズの接続確認 | - | - |",
+        "",
+        "## ユースケースシナリオ",
+        "",
+        "dry-run のためユースケースシナリオは生成されていません。",
+        "",
+        "## 状態遷移",
+        "",
+        "dry-run のため状態遷移は解析されていません。",
+        "",
+        "## シーケンス図",
+        "",
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant User as ユーザー",
+        "    participant System as システム",
+        "    User->>System: (dry-run) ビジネスロジック解析フェーズの接続確認",
+        "    System-->>User: (dry-run) 確認完了",
+        "```",
+        "",
+        "## 入力サマリー",
+        "",
+        "### コードベースマップ",
+        "",
+        truncate(codebaseMapSection, 2000),
+        "",
+        "### エクスポートシンボル",
+        "",
+        truncate(exportedSymbolsSection, 2000),
       ].join("\n");
     }
     return "Gemini dry-run response";

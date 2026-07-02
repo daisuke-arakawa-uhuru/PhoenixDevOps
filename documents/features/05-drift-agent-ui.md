@@ -75,7 +75,7 @@ stateDiagram-v2
 
 #### ③ 結果表示・ダウンロード画面（`ResultViewer`）
 * **タブ切り替えスイッチ**:
-  * 「真の設計書 (`true-design.md`)」「ドキュメント差分レポート (`document-drift-report.md`)」「インフラ構成仕様 (`infrastructure_spec.md`)」の3枚のタブ。
+  * 「SSOT仕様書 (`single-source-of-truth.md`)」「真の設計書 (`true-design.md`)」「ドキュメント差分レポート (`document-drift-report.md`)」「インフラ構成仕様 (`infrastructure_spec.md`)」のタブ。
 * **Markdownプレビューエリア**:
   * MarkdownをHTMLに変換し、スタイルを適用して表示する。
   * テーブル（表）は線や背景色を整え、コードブロックはシンタックスハイライト風の等幅フォントスタイルを適用する。
@@ -148,15 +148,16 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
   ```
 * **レスポンス (200 OK - succeeded時)**:
   ```json
-	  {
-	    "jobId": "job-123",
-	    "status": "succeeded",
-	    "artifactPaths": {
-	      "true-design.md": "gs://...",
-	      "document-drift-report.md": "gs://...",
-	      "infrastructure_spec.md": "gs://..."
-	    }
-	  }
+  {
+    "jobId": "job-123",
+    "status": "succeeded",
+    "artifactPaths": {
+      "single-source-of-truth.md": "gs://...",
+      "true-design.md": "gs://...",
+      "document-drift-report.md": "gs://...",
+      "infrastructure_spec.md": "gs://..."
+    }
+  }
   ```
 * **レスポンス (200 OK - failed時)**:
   ```json
@@ -173,28 +174,33 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
 * **エンドポイント**: `GET /jobs/{jobId}/results`
 * **レスポンス (200 OK)**:
   ```json
-	  {
-	    "jobId": "job-123",
-	    "status": "succeeded",
-	    "expiresIn": 3600,
-	    "artifacts": [
-	      {
-	        "name": "true-design.md",
-	        "uri": "gs://...",
-	        "url": "https://storage.googleapis.com/... (signed URL)"
-	      },
-	      {
-	        "name": "document-drift-report.md",
-	        "uri": "gs://...",
-	        "url": "https://storage.googleapis.com/... (signed URL)"
-	      },
-	      {
-	        "name": "infrastructure_spec.md",
-	        "uri": "gs://...",
-	        "url": "https://storage.googleapis.com/... (signed URL)"
-	      }
-	    ]
-	  }
+  {
+    "jobId": "job-123",
+    "status": "succeeded",
+    "expiresIn": 3600,
+    "artifacts": [
+      {
+        "name": "single-source-of-truth.md",
+        "uri": "gs://...",
+        "url": "https://storage.googleapis.com/... (signed URL)"
+      },
+      {
+        "name": "true-design.md",
+        "uri": "gs://...",
+        "url": "https://storage.googleapis.com/... (signed URL)"
+      },
+      {
+        "name": "document-drift-report.md",
+        "uri": "gs://...",
+        "url": "https://storage.googleapis.com/... (signed URL)"
+      },
+      {
+        "name": "infrastructure_spec.md",
+        "uri": "gs://...",
+        "url": "https://storage.googleapis.com/... (signed URL)"
+      }
+    ]
+  }
   ```
 * **コンテンツ描画処理**:
   * UIは返却された各 `url`（署名付きURL）に対してブラウザから `fetch` を実行し、Markdownの生テキストデータを取得する。

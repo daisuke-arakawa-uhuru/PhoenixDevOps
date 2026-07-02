@@ -213,6 +213,7 @@ export async function getJobStatus(jobId: string): Promise<JobResponse> {
 
     if (job.status === 'succeeded') {
       res.artifactPaths = {
+        'single-source-of-truth.md': `gs://phoenix-uploads/results/${jobId}/single-source-of-truth.md`,
         'true-design.md': `gs://phoenix-uploads/results/${jobId}/true-design.md`,
         'document-drift-report.md': `gs://phoenix-uploads/results/${jobId}/document-drift-report.md`,
       };
@@ -247,6 +248,11 @@ export async function getJobResults(jobId: string): Promise<ResultsResponse> {
       expiresIn: 3600,
       artifacts: [
         {
+          name: 'single-source-of-truth.md',
+          uri: `gs://phoenix-uploads/results/${jobId}/single-source-of-truth.md`,
+          url: `mock://results/${jobId}/single-source-of-truth.md`,
+        },
+        {
           name: 'true-design.md',
           uri: `gs://phoenix-uploads/results/${jobId}/true-design.md`,
           url: `mock://results/${jobId}/true-design.md`,
@@ -278,7 +284,9 @@ export async function getJobResults(jobId: string): Promise<ResultsResponse> {
 export async function fetchFileContent(url: string): Promise<string> {
   if (url.startsWith('mock://')) {
     await new Promise((resolve) => setTimeout(resolve, 300));
-    if (url.endsWith('true-design.md')) {
+    if (url.endsWith('single-source-of-truth.md')) {
+      return MOCK_SSOT;
+    } else if (url.endsWith('true-design.md')) {
       return MOCK_TRUE_DESIGN;
     } else if (url.endsWith('document-drift-report.md')) {
       return MOCK_DRIFT_REPORT;
@@ -309,6 +317,57 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
 }
 
 // --- Mock Data Constants ---
+
+const MOCK_SSOT = `# PhoenixDevOps - Single Source of Truth
+
+## 1. 解析対象サマリー
+
+本仕様書は、インフラ、API、DB、ビジネスロジックの個別解析結果を統合したシステム全体の真実の仕様書です。
+
+## 2. システム全体像
+
+ユーザーは SPA から API を呼び出し、API は認証と入力検証後にサービス層へ処理を委譲します。サービス層は顧客管理ユースケースを実行し、MySQL の顧客テーブルを参照または更新します。
+
+## 3. システムコンポーネント図
+
+\`\`\`mermaid
+flowchart LR
+  Browser[Web UI] --> Api[Laravel API]
+  Api --> Service[Customer Service]
+  Service --> Db[(MySQL)]
+  Api --> Queue[Background Queue]
+  Queue --> Worker[Async Worker]
+\`\`\`
+
+## 4. データフロー図
+
+\`\`\`mermaid
+sequenceDiagram
+  participant User as ユーザー
+  participant API as API
+  participant Service as サービス層
+  participant DB as DB
+  User->>API: 顧客登録リクエスト
+  API->>API: 認証・入力検証
+  API->>Service: 顧客作成ユースケース
+  Service->>DB: customers INSERT
+  DB-->>Service: 作成結果
+  Service-->>API: 顧客DTO
+  API-->>User: 201 Created
+\`\`\`
+
+## 5. エンドポイント別データフロー
+
+| エンドポイント | ユースケース | DB操作 | 非同期処理 | 根拠 |
+| --- | --- | --- | --- | --- |
+| \`POST /api/v1/customers\` | 顧客登録 | \`customers\` INSERT | 通知キュー投入候補 | \`routes/api.php\`, \`CustomerService.php\` |
+| \`GET /api/v1/customers\` | 顧客一覧取得 | \`customers\` SELECT | なし | \`CustomerController@index\` |
+
+## 6. 判断不能・推測事項
+
+- キュー基盤の実体は mock データでは確定できません。
+- IAM、ネットワーク、監視設定はインフラ解析結果が必要です。
+`;
 
 const MOCK_TRUE_DESIGN = `# PhoenixDevOps - 真の設計書 (True Design Specification)
 
