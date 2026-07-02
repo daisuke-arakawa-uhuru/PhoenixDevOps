@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getJobStatus } from '../utils/api';
 import { AlertCircle, ArrowLeft, RefreshCw, Clock } from 'lucide-react';
 
@@ -7,24 +7,46 @@ interface JobProgressProps {
   projectName: string;
   onComplete: (jobId: string) => void;
   onBack: () => void;
+  initialStatus?: 'queued' | 'running' | 'failed' | null;
+  initialErrorMessage?: string | null;
+  initialElapsedTime?: number | null;
 }
 
-export default function JobProgress({ jobId, projectName, onComplete, onBack }: JobProgressProps) {
-  const [status, setStatus] = useState<'queued' | 'running' | 'succeeded' | 'failed'>('queued');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
+export default function JobProgress({
+  jobId,
+  projectName,
+  onComplete,
+  onBack,
+  initialStatus = null,
+  initialErrorMessage = null,
+  initialElapsedTime = null,
+}: JobProgressProps) {
+  const [status, setStatus] = useState<'queued' | 'running' | 'succeeded' | 'failed'>(
+    initialStatus ?? 'queued',
+  );
+  const [errorMsg, setErrorMsg] = useState<string | null>(initialErrorMessage);
+  const [elapsedTime, setElapsedTime] = useState(initialElapsedTime ?? 0);
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   // Poll status
   useEffect(() => {
+    if (initialStatus === 'failed') {
+      return;
+    }
+
     let timerId: number;
-    
+
     const checkStatus = async () => {
       try {
         const job = await getJobStatus(jobId);
         setStatus(job.status);
-        
+
         if (job.status === 'succeeded') {
-          onComplete(jobId);
+          onCompleteRef.current(jobId);
         } else if (job.status === 'failed') {
           setErrorMsg(job.errorMessage || '不明な解析エラーが発生しました。');
         } else {
@@ -44,7 +66,7 @@ export default function JobProgress({ jobId, projectName, onComplete, onBack }: 
     return () => {
       clearTimeout(timerId);
     };
-  }, [jobId, onComplete]);
+  }, [jobId, initialStatus]);
 
   // Stopwatch counter
   useEffect(() => {
