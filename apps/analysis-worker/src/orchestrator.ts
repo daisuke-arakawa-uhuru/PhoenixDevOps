@@ -6,6 +6,7 @@ import {
   DesignGenerator,
   BusinessLogicEngine,
   DatabaseSchemaEngine,
+  ApiSpecificationEngine,
   generatedArtifacts,
   ExtractionResult,
   SsotSynthesisGenerator,
@@ -61,6 +62,7 @@ export class AnalysisOrchestrator {
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
   private ssotSynthesisGenerator: SsotSynthesisGenerator | null;
+  private apiSpecificationEngine: ApiSpecificationEngine | null;
 
   constructor({
     jobRepository,
@@ -74,6 +76,7 @@ export class AnalysisOrchestrator {
     databaseSchemaEngine = null,
     businessLogicEngine = null,
     ssotSynthesisGenerator = null,
+    apiSpecificationEngine = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -86,6 +89,7 @@ export class AnalysisOrchestrator {
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
     ssotSynthesisGenerator?: SsotSynthesisGenerator | null;
+    apiSpecificationEngine?: ApiSpecificationEngine | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -98,6 +102,7 @@ export class AnalysisOrchestrator {
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
     this.ssotSynthesisGenerator = ssotSynthesisGenerator;
+    this.apiSpecificationEngine = apiSpecificationEngine;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -138,10 +143,21 @@ export class AnalysisOrchestrator {
         );
       }
 
+      // API・インターフェース解析（エンジンが設定されている場合のみ実行）
+      let apiSpecificationMarkdown: string | null = null;
+      if (this.apiSpecificationEngine) {
+        apiSpecificationMarkdown = await this.apiSpecificationEngine.analyze(
+          payload,
+          inputs,
+          sourceSpecification,
+        );
+      }
+
       const componentSpecifications = buildSynthesisComponentSpecifications(
         sourceSpecification,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
+        apiSpecificationMarkdown,
       );
 
       let ssotMarkdown: string | null = null;
@@ -169,6 +185,7 @@ export class AnalysisOrchestrator {
         extraFiles: sourceSpecification.artifacts,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
+        apiSpecificationMarkdown,
       });
 
       const files = artifacts.asFiles();
@@ -203,6 +220,7 @@ function buildSynthesisComponentSpecifications(
   sourceSpecification: ExtractionResult,
   databaseSchemaSpecMarkdown: string | null,
   businessLogicSpecMarkdown: string | null,
+  apiSpecificationMarkdown: string | null = null,
 ): SynthesisComponentSpecifications {
   const artifacts = sourceSpecification.artifacts ?? {};
   return {
@@ -211,7 +229,7 @@ function buildSynthesisComponentSpecifications(
       "infrastructure-spec.md",
       "iac-structure.md",
     ]),
-    apiSpecMarkdown: collectApiSpecMarkdown(artifacts),
+    apiSpecMarkdown: apiSpecificationMarkdown ?? collectApiSpecMarkdown(artifacts),
     databaseSchemaSpecMarkdown,
     businessLogicSpecMarkdown,
   };

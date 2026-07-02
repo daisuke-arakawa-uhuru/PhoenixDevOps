@@ -340,6 +340,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | ドキュメント抽出 | `DOCUMENT_EXTRACTION` | 既存ドキュメント本文から仕様記述と根拠ドキュメントを抽出する |
 | DB・データモデル解析 | `DATABASE_SCHEMA_ANALYSIS` | DB定義コードからER図、データディクショナリ、リレーション・制約一覧を生成する |
 | ビジネスロジック解析 | `BUSINESS_LOGIC_ANALYSIS` | サービス層、ドメインモデル、ユースケースから業務フローと状態遷移を生成する |
+| API・インターフェース解析 | `API_SPECIFICATION_ANALYSIS` | ルーティング、コントローラー、バリデーションから全APIエンドポイントを抽出しAPI仕様書を生成する |
 | SSOT合成 | `SSOT_SYNTHESIS` | インフラ/API/DB/ビジネスロジックの個別解析結果を統合し、コンポーネント図とデータフロー図を含むシステム全体仕様を生成する |
 | 真の設計書生成 | `TRUE_DESIGN` | ソースコード解析結果を正として10章構成の設計書を生成する |
 | 差分レポート生成 | `DRIFT_REPORT` | 実装仕様と文書仕様を4分類で比較し、重要度・確度・根拠・推奨対応を出す |
@@ -359,6 +360,7 @@ Gemini に渡す前に、ワーカー側で次の軽量な構造情報を抽出�
 | インフラ物理/論理構成仕様 | `infrastructure_spec.md` | Gemini 生成 |
 | DB・データモデル仕様書 | `database_schema_spec.md` | Gemini 生成 |
 | ビジネスロジック仕様書 | `business_logic_spec.md` | Gemini 生成 |
+| API仕様書 | `api_specification.md` | Gemini 生成 |
 | コードベースマップ | `codebase-map.md` | 静的解析（デバッグ用中間成果物） |
 | モジュール依存グラフ | `module-dependencies.mmd` | 静的解析（デバッグ用中間成果物） |
 | IaC構造ダンプ | `iac-structure.md` | 静的解析（デバッグ用中間成果物） |

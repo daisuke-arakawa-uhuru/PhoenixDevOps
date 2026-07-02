@@ -8,6 +8,7 @@ import {
   renderSourceOverviewMarkdown,
   identifyDatabaseDefinitionFiles,
   identifyBusinessLogicFiles,
+  identifyApiRelatedFiles,
   collectExportedSymbolsSummary,
   CodebaseMap,
 } from "./code-map.js";
@@ -19,6 +20,7 @@ import {
   buildDatabaseSchemaAnalysisPrompt,
   buildBusinessLogicAnalysisPrompt,
   buildSsotSynthesisPrompt,
+  buildApiSpecificationAnalysisPrompt,
 } from "./prompts.js";
 
 export interface ExtractionResult extends SpecificationResult {
@@ -410,6 +412,85 @@ export class PlaceholderBusinessLogicEngine implements BusinessLogicEngine {
   }
 }
 
+export interface ApiSpecificationEngine {
+  analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string>;
+}
+
+export class GeminiApiSpecificationAnalysisEngine implements ApiSpecificationEngine {
+  constructor(private geminiClient: GeminiClient) {}
+
+  async analyze(
+    payload: AnalysisTaskPayload,
+    inputs: AnalysisInput,
+    sourceSpecification: ExtractionResult,
+  ): Promise<string> {
+    const analysisFiles =
+      inputs.allSourceFiles && inputs.allSourceFiles.length > 0
+        ? inputs.allSourceFiles
+        : inputs.sourceFiles;
+
+    // STEP 1 成果物: CodebaseMap を取得
+    const codebaseMap: CodebaseMap = sourceSpecification.extractedItems
+      .static_overview as CodebaseMap;
+
+    // API関連ファイルを特定
+    const apiRelatedFiles = identifyApiRelatedFiles(
+      codebaseMap,
+      analysisFiles,
+      60,
+    );
+
+    // STEP 1 成果物: exported-symbols 情報を集約
+    const exportedSymbolsSummary = collectExportedSymbolsSummary(
+      sourceSpecification.artifacts ?? {},
+    );
+
+    // CodebaseMap の JSON サマリー（トークン制限のため軽量化）
+    const codebaseMapJson = JSON.stringify(
+      {
+        summary: codebaseMap.summary,
+        apiRoutes: codebaseMap.apiRoutes,
+        configFiles: codebaseMap.configFiles,
+        dependencies: codebaseMap.dependencies,
+      },
+      null,
+      2,
+    );
+
+    const prompt = buildApiSpecificationAnalysisPrompt(
+      payload,
+      inputs,
+      apiRelatedFiles,
+      codebaseMapJson,
+      exportedSymbolsSummary,
+    );
+
+    return this.geminiClient.generate(prompt);
+  }
+}
+
+export class PlaceholderApiSpecificationEngine implements ApiSpecificationEngine {
+  async analyze(): Promise<string> {
+    return [
+      "# API仕様書",
+      "",
+      "この成果物はプレースホルダーです。",
+      "Gemini API による API・インターフェース解析はまだ実行されていません。",
+      "",
+      "## エンドポイント一覧",
+      "",
+      "| メソッド | パス | 概要 | 根拠ファイル |",
+      "| --- | --- | --- | --- |",
+      "| (未解析) | - | - | - |",
+      "",
+    ].join("\n");
+  }
+}
+
 export function generatedArtifacts(
   {
     trueDesignMarkdown,
@@ -418,6 +499,7 @@ export function generatedArtifacts(
     extraFiles = {},
     databaseSchemaSpecMarkdown = null,
     businessLogicSpecMarkdown = null,
+    apiSpecificationMarkdown = null,
   }: {
     trueDesignMarkdown: string;
     driftReportMarkdown: string;
@@ -425,6 +507,7 @@ export function generatedArtifacts(
     extraFiles?: Record<string, string>;
     databaseSchemaSpecMarkdown?: string | null;
     businessLogicSpecMarkdown?: string | null;
+    apiSpecificationMarkdown?: string | null;
   },
 ) {
   return {
@@ -433,6 +516,7 @@ export function generatedArtifacts(
     ssotMarkdown,
     databaseSchemaSpecMarkdown,
     businessLogicSpecMarkdown,
+    apiSpecificationMarkdown,
     extraFiles: { ...extraFiles },
     asFiles() {
       const files: Record<string, string> = {
@@ -448,6 +532,9 @@ export function generatedArtifacts(
       }
       if (this.businessLogicSpecMarkdown) {
         files["business_logic_spec.md"] = this.businessLogicSpecMarkdown;
+      }
+      if (this.apiSpecificationMarkdown) {
+        files["api_specification.md"] = this.apiSpecificationMarkdown;
       }
       return files;
     },
