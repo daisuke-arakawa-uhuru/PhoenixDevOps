@@ -210,6 +210,7 @@ UIはバックエンドAPI（Cloud Functions）と以下の仕様で連携する
 * **コンテンツ描画処理**:
   * UIは返却された各 `url`（署名付きURL）に対してブラウザから `fetch` を実行し、Markdownの生テキストデータを取得する。
   * 取得した生テキストを画面上のMarkdownプレビュー領域に渡し、HTMLとしてレンダリングする。
+  * Markdown 内の ` ```mermaid ` コードフェンスは、コードブロックのまま表示せず、図としてレンダリングする。
   * ダウンロード時は、この `url` を `<a>` タグの `href` に設定し、`download` 属性を指定してダウンロードさせる。
   * 成果物保存先のCloud Storageバケットは、署名付きURLのMarkdownプレビュー用に `GET` / `HEAD` のCORSを許可する。
 

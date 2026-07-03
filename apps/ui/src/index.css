@@ -642,6 +642,34 @@ body {
     }
   }
 
+  .mermaid-block {
+    background: #090e16;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    margin-bottom: 18px;
+  }
+
+  .mermaid-diagram {
+    min-width: fit-content;
+
+    svg {
+      display: block;
+      height: auto;
+      margin: 0 auto;
+    }
+  }
+
+  .mermaid-placeholder {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
   /* Inline code */
   code {
     font-family: var(--font-mono);
