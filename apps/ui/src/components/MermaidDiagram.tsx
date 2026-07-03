@@ -9,6 +9,47 @@ type MermaidModule = typeof import('mermaid').default;
 let isMermaidInitialized = false;
 let mermaidModulePromise: Promise<MermaidModule> | null = null;
 
+function normalizeSubgraphLabel(line: string): string {
+  const bracketMatch = line.match(/^(\s*subgraph\s+)([A-Za-z0-9_-]+)\s*\[(.+)\]\s*$/);
+
+  if (bracketMatch) {
+    const [, prefix, id, rawLabel] = bracketMatch;
+    const label = rawLabel.trim();
+
+    if (
+      (label.startsWith('"') && label.endsWith('"')) ||
+      (label.startsWith("'") && label.endsWith("'")) ||
+      (label.startsWith('`') && label.endsWith('`'))
+    ) {
+      return line;
+    }
+
+    return `${prefix}${id}["${label.replaceAll('"', '\\"')}"]`;
+  }
+
+  const parenMatch = line.match(/^(\s*subgraph\s+)([A-Za-z0-9_-]+)\s*\((.+)\)\s*$/);
+
+  if (parenMatch) {
+    const [, prefix, id, rawLabel] = parenMatch;
+    const label = rawLabel.trim();
+    return `${prefix}${id}["${label.replaceAll('"', '\\"')}"]`;
+  }
+
+  return line;
+}
+
+function normalizeMermaidChart(chart: string): string {
+  return chart
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .map(normalizeSubgraphLabel)
+    .join('\n');
+}
+
+function isMermaidErrorSvg(svg: string): boolean {
+  return svg.includes('Syntax error in text') || svg.includes('class="error-icon"');
+}
+
 async function loadMermaid() {
   mermaidModulePromise ??= import('mermaid').then(({ default: mermaid }) => {
     if (!isMermaidInitialized) {
@@ -54,27 +95,54 @@ export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
     let frameId: number | null = null;
 
     const renderDiagram = async () => {
+      const normalizedChart = normalizeMermaidChart(chart);
+      const chartVariants = normalizedChart === chart ? [chart] : [normalizedChart, chart];
+
       try {
         const mermaid = await loadMermaid();
-        renderSequenceRef.current += 1;
+        let lastError: unknown = null;
 
-        const { svg: renderedSvg, bindFunctions } = await mermaid.render(
-          `mermaid-${diagramId}-${renderSequenceRef.current}`,
-          chart,
-        );
+        for (const chartVariant of chartVariants) {
+          try {
+            const parseResult = await mermaid.parse(chartVariant, { suppressErrors: true });
 
-        if (isCancelled) {
-          return;
+            if (!parseResult) {
+              lastError = new Error('Mermaid syntax validation failed.');
+              continue;
+            }
+
+            renderSequenceRef.current += 1;
+
+            const { svg: renderedSvg, bindFunctions } = await mermaid.render(
+              `mermaid-${diagramId}-${renderSequenceRef.current}`,
+              chartVariant,
+            );
+
+            if (isMermaidErrorSvg(renderedSvg)) {
+              lastError = new Error('Mermaid returned an error diagram.');
+              continue;
+            }
+
+            if (isCancelled) {
+              return;
+            }
+
+            setHasError(false);
+            setSvg(renderedSvg);
+
+            frameId = window.requestAnimationFrame(() => {
+              if (!isCancelled && containerRef.current && bindFunctions) {
+                bindFunctions(containerRef.current);
+              }
+            });
+
+            return;
+          } catch (error) {
+            lastError = error;
+          }
         }
 
-        setHasError(false);
-        setSvg(renderedSvg);
-
-        frameId = window.requestAnimationFrame(() => {
-          if (!isCancelled && containerRef.current && bindFunctions) {
-            bindFunctions(containerRef.current);
-          }
-        });
+        throw lastError;
       } catch (error) {
         console.error('Failed to render Mermaid diagram:', error);
 
