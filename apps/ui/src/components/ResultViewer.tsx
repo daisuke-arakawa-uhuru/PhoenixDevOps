@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { useState, useEffect, isValidElement, type ReactNode } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getJobResults, fetchFileContent, type Artifact } from '../utils/api';
 import { FileText, AlertTriangle, Download, RefreshCw, Loader2, Network } from 'lucide-react';
+import MermaidDiagram from './MermaidDiagram';
 
 interface ResultViewerProps {
   jobId: string;
@@ -32,6 +33,46 @@ const RESULT_TABS = [
     icon: AlertTriangle,
   },
 ] as const;
+
+function flattenTextContent(value: ReactNode): string {
+  if (Array.isArray(value)) {
+    return value.map(flattenTextContent).join('');
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
+  }
+
+  return '';
+}
+
+function extractMermaidChart(children: ReactNode): string | null {
+  const firstChild = Array.isArray(children) ? children[0] : children;
+
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(firstChild)) {
+    return null;
+  }
+
+  const className = firstChild.props.className ?? '';
+
+  if (!className.split(/\s+/).includes('language-mermaid')) {
+    return null;
+  }
+
+  return flattenTextContent(firstChild.props.children).replace(/\n$/, '');
+}
+
+const markdownComponents: Components = {
+  pre({ children, ...props }) {
+    const chart = extractMermaidChart(children);
+
+    if (!chart) {
+      return <pre {...props}>{children}</pre>;
+    }
+
+    return <MermaidDiagram key={chart} chart={chart} />;
+  },
+};
 
 export default function ResultViewer({ jobId, projectName, onReset }: ResultViewerProps) {
   const [activeTab, setActiveTab] = useState<ResultTabId>('ssot');
@@ -182,7 +223,7 @@ export default function ResultViewer({ jobId, projectName, onReset }: ResultView
         ) : (
           <div className="preview-container" id="markdown-preview-container">
             <div className="markdown-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                 {fileContent}
               </ReactMarkdown>
             </div>
