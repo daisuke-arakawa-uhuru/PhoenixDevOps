@@ -326,3 +326,23 @@ variable "ui_max_instance_request_concurrency" {
   type        = number
   default     = 80
 }
+
+# === 監視 (Cloud Monitoring) ===
+
+variable "monitoring_alert_email_addresses" {
+  description = "アラート通知先メールアドレス一覧。空リストの場合は通知チャネルを作成せずアラートポリシーは無効状態になる。"
+  type        = list(string)
+  default     = []
+}
+
+variable "monitoring_worker_error_threshold" {
+  description = "解析ワーカーのエラーログ件数アラート閾値（5分間）"
+  type        = number
+  default     = 1
+}
+
+variable "monitoring_api_error_threshold" {
+  description = "HTTP API のエラーログ件数アラート閾値（5分間）"
+  type        = number
+  default     = 3
+}

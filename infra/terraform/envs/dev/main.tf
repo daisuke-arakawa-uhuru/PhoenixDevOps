@@ -135,3 +135,22 @@ module "ui_hosting" {
     module.analysis_worker,
   ]
 }
+
+# === Cloud Monitoring: アラートポリシー / ログベースメトリクス ===
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  project_id           = var.project_id
+  name_prefix          = local.name_prefix
+  worker_function_name = module.analysis_worker.function_name
+  api_function_name    = module.api.function_name
+
+  alert_email_addresses  = var.monitoring_alert_email_addresses
+  worker_error_threshold = var.monitoring_worker_error_threshold
+  api_error_threshold    = var.monitoring_api_error_threshold
+
+  depends_on = [
+    module.analysis_worker,
+    module.api,
+  ]
+}
