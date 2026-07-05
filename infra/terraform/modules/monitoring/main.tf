@@ -76,8 +76,12 @@ resource "google_monitoring_alert_policy" "worker_errors" {
     display_name = "Worker ERROR log count > ${var.worker_error_threshold} (5min)"
 
     condition_threshold {
-      # ログベースメトリクスは resource.type="global" で集計されるため resource.type の絞り込みは不要
-      filter          = "metric.type=\"logging.googleapis.com/user/${var.name_prefix}-worker-errors\""
+      # Monitoring API の閾値条件フィルタは resource.type の指定が必須。
+      # ログベースメトリクスの時系列は元ログのリソースタイプ（Gen2 = cloud_run_revision）を引き継ぐ。
+      filter = join(" AND ", [
+        "resource.type = \"cloud_run_revision\"",
+        "metric.type = \"logging.googleapis.com/user/${var.name_prefix}-worker-errors\"",
+      ])
       comparison      = "COMPARISON_GT"
       duration        = "0s"
       threshold_value = var.worker_error_threshold - 1
@@ -132,7 +136,10 @@ resource "google_monitoring_alert_policy" "api_errors" {
     display_name = "API ERROR log count > ${var.api_error_threshold} (5min)"
 
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${var.name_prefix}-api-errors\""
+      filter = join(" AND ", [
+        "resource.type = \"cloud_run_revision\"",
+        "metric.type = \"logging.googleapis.com/user/${var.name_prefix}-api-errors\"",
+      ])
       comparison      = "COMPARISON_GT"
       duration        = "0s"
       threshold_value = var.api_error_threshold - 1
