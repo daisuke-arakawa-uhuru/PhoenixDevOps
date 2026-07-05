@@ -61,8 +61,8 @@ export class AnalysisOrchestrator {
   private infrastructureAgent: InfrastructureAgent | null;
   private databaseSchemaEngine: DatabaseSchemaEngine | null;
   private businessLogicEngine: BusinessLogicEngine | null;
-  private ssotSynthesisGenerator: SsotSynthesisGenerator | null;
   private apiSpecificationEngine: ApiSpecificationEngine | null;
+  private ssotSynthesisGenerator: SsotSynthesisGenerator | null;
 
   constructor({
     jobRepository,
@@ -75,8 +75,8 @@ export class AnalysisOrchestrator {
     infrastructureAgent = null,
     databaseSchemaEngine = null,
     businessLogicEngine = null,
-    ssotSynthesisGenerator = null,
     apiSpecificationEngine = null,
+    ssotSynthesisGenerator = null,
   }: {
     jobRepository: JobRepository;
     inputLoader: InputLoader;
@@ -88,8 +88,8 @@ export class AnalysisOrchestrator {
     infrastructureAgent?: InfrastructureAgent | null;
     databaseSchemaEngine?: DatabaseSchemaEngine | null;
     businessLogicEngine?: BusinessLogicEngine | null;
-    ssotSynthesisGenerator?: SsotSynthesisGenerator | null;
     apiSpecificationEngine?: ApiSpecificationEngine | null;
+    ssotSynthesisGenerator?: SsotSynthesisGenerator | null;
   }) {
     this.jobRepository = jobRepository;
     this.inputLoader = inputLoader;
@@ -101,8 +101,8 @@ export class AnalysisOrchestrator {
     this.infrastructureAgent = infrastructureAgent;
     this.databaseSchemaEngine = databaseSchemaEngine;
     this.businessLogicEngine = businessLogicEngine;
-    this.ssotSynthesisGenerator = ssotSynthesisGenerator;
     this.apiSpecificationEngine = apiSpecificationEngine;
+    this.ssotSynthesisGenerator = ssotSynthesisGenerator;
   }
 
   async run(payload: AnalysisTaskPayload): Promise<WorkerResult> {
@@ -143,7 +143,6 @@ export class AnalysisOrchestrator {
         );
       }
 
-      // API・インターフェース解析（エンジンが設定されている場合のみ実行）
       let apiSpecificationMarkdown: string | null = null;
       if (this.apiSpecificationEngine) {
         apiSpecificationMarkdown = await this.apiSpecificationEngine.analyze(
@@ -153,11 +152,17 @@ export class AnalysisOrchestrator {
         );
       }
 
+      let infrastructureSpecMarkdown: string | null = null;
+      if (this.infrastructureAgent) {
+        infrastructureSpecMarkdown = await this.infrastructureAgent.analyze(payload, inputs);
+      }
+
       const componentSpecifications = buildSynthesisComponentSpecifications(
         sourceSpecification,
+        infrastructureSpecMarkdown,
+        apiSpecificationMarkdown,
         databaseSchemaSpecMarkdown,
         businessLogicSpecMarkdown,
-        apiSpecificationMarkdown,
       );
 
       let ssotMarkdown: string | null = null;
@@ -187,14 +192,13 @@ export class AnalysisOrchestrator {
         businessLogicSpecMarkdown,
         apiSpecificationMarkdown,
       });
-
-      const files = artifacts.asFiles();
+      const files: Record<string, string> = artifacts.asFiles();
       const debugFiles = {
         ...(sourceSpecification.debugArtifacts ?? {}),
         ...(documentSpecification.debugArtifacts ?? {}),
       };
-      if (this.infrastructureAgent) {
-        files["infrastructure_spec.md"] = await this.infrastructureAgent.analyze(payload, inputs);
+      if (infrastructureSpecMarkdown) {
+        files["infrastructure_spec.md"] = infrastructureSpecMarkdown;
       }
       const artifactPaths = await this.artifactWriter.write(payload, {
         ...files,
@@ -218,21 +222,34 @@ export class AnalysisOrchestrator {
 
 function buildSynthesisComponentSpecifications(
   sourceSpecification: ExtractionResult,
+  infrastructureSpecMarkdown: string | null,
+  apiSpecificationMarkdown: string | null,
   databaseSchemaSpecMarkdown: string | null,
   businessLogicSpecMarkdown: string | null,
-  apiSpecificationMarkdown: string | null = null,
 ): SynthesisComponentSpecifications {
   const artifacts = sourceSpecification.artifacts ?? {};
   return {
-    infrastructureSpecMarkdown: firstArtifactContent(artifacts, [
-      "infrastructure_spec.md",
-      "infrastructure-spec.md",
-      "iac-structure.md",
-    ]),
-    apiSpecMarkdown: apiSpecificationMarkdown ?? collectApiSpecMarkdown(artifacts),
+    infrastructureSpecMarkdown: firstNonEmpty(
+      infrastructureSpecMarkdown,
+      firstArtifactContent(artifacts, [
+        "infrastructure_spec.md",
+        "infrastructure-spec.md",
+        "iac-structure.md",
+      ]),
+    ),
+    apiSpecMarkdown: firstNonEmpty(apiSpecificationMarkdown, collectApiSpecMarkdown(artifacts)),
     databaseSchemaSpecMarkdown,
     businessLogicSpecMarkdown,
   };
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (value && value.trim()) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function firstArtifactContent(

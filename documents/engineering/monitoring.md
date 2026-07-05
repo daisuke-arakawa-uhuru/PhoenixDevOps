@@ -11,13 +11,18 @@
 Cloud Functions ─── Cloud Logging ──▶ ログベースメトリクス ──▶ Cloud Monitoring アラート ──▶ メール通知
      │                                                          │
      └───────────────── ネイティブメトリクス ──────────────────┘
-                  (execution_count / execution_times)
+              (run.googleapis.com/request_count / request_latencies)
 ```
+
+> **注意**: 本プロジェクトの Cloud Functions はすべて **Gen2**（Cloud Run ベース）です。
+> そのためログは `resource.type="cloud_run_revision"`（関数名は `service_name` ラベル）で記録され、
+> メトリクスも `run.googleapis.com/*`（Cloud Run）系を使用します。
+> `cloudfunctions.googleapis.com/*` 系メトリクスや `function_name` ラベルは Gen1 用のため使用しません。
 
 | 観測対象 | 主なシグナル | 収集手段 |
 |---|---|---|
-| 解析ワーカー (Cloud Functions) | 実行回数・エラー率・実行時間 | CF ネイティブメトリクス + ログ |
-| HTTP API (Cloud Functions) | リクエスト数・エラー率 | CF ネイティブメトリクス + ログ |
+| 解析ワーカー (Cloud Functions Gen2) | リクエスト数・エラー率・レイテンシ | Cloud Run ネイティブメトリクス + ログ |
+| HTTP API (Cloud Functions Gen2) | リクエスト数・エラー率 | Cloud Run ネイティブメトリクス + ログ |
 | Cloud Tasks キュー | タスク深度・リトライ数・失敗タスク | Cloud Tasks ログ (Stackdriver) |
 | Firestore | ジョブステータス分布 | Cloud Logging (構造化ログ) |
 | Cloud Storage | バケット使用量・オブジェクト数 | Cloud Monitoring |
@@ -28,11 +33,11 @@ Cloud Functions ─── Cloud Logging ──▶ ログベースメトリクス
 
 Terraform モジュール `infra/terraform/modules/monitoring` で以下の 3 つのアラートポリシーを定義しています。
 
-| ポリシー名 | 検知条件 | 通知頻度上限 |
+| ポリシー名 | 検知条件 | 自動クローズ |
 |---|---|---|
-| `[PhoenixDevOps] 解析ワーカー エラー発生` | ERROR ログが 5分間で閾値（デフォルト 1件）超過 | 1時間に 1通 |
-| `[PhoenixDevOps] HTTP API エラー発生` | ERROR ログが 5分間で閾値（デフォルト 3件）超過 | 30分に 1通 |
-| `[PhoenixDevOps] 解析ワーカー 実行失敗（タイムアウト/クラッシュ）` | CF 実行ステータスが `error` / `timeout` / `crash` / `connection_error` | 1時間に 1通 |
+| `[PhoenixDevOps] 解析ワーカー エラー発生` | ERROR ログが 5分間で閾値（デフォルト 1件）以上 | 条件解消から 30分 |
+| `[PhoenixDevOps] HTTP API エラー発生` | ERROR ログが 5分間で閾値（デフォルト 3件）以上 | 条件解消から 30分 |
+| `[PhoenixDevOps] 解析ワーカー 実行失敗（タイムアウト/クラッシュ）` | Cloud Run `request_count` の `5xx` レスポンス（クラッシュ=500 / タイムアウト=504） | 条件解消から 30分 |
 
 ### 通知先の設定方法
 
@@ -52,23 +57,22 @@ Terraform モジュール `infra/terraform/modules/monitoring` で以下の 3 �
 
 ## 3. 主要メトリクスとダッシュボード
 
-### Cloud Functions - 解析ワーカー
+### Cloud Functions Gen2 - 解析ワーカー（Cloud Run メトリクス）
 
 | メトリクス | 説明 | 正常範囲の目安 |
 |---|---|---|
-| `cloudfunctions.googleapis.com/function/execution_count{status="ok"}` | 成功実行数 | ジョブ投入数に一致 |
-| `cloudfunctions.googleapis.com/function/execution_count{status="error"}` | エラー終了数 | 0 が理想 |
-| `cloudfunctions.googleapis.com/function/execution_count{status="timeout"}` | タイムアウト数 | 0 が理想（上限: 540秒） |
-| `cloudfunctions.googleapis.com/function/execution_times` | 実行時間（分布） | P99 < 480秒（タイムアウトの 89%） |
-| `cloudfunctions.googleapis.com/function/active_instances` | 稼働インスタンス数 | max_instance_count (3) 以下 |
+| `run.googleapis.com/request_count{response_code_class="2xx"}` | 成功実行数 | ジョブ投入数に一致 |
+| `run.googleapis.com/request_count{response_code_class="5xx"}` | 失敗数（クラッシュ=500 / タイムアウト=504） | 0 が理想（タイムアウト上限: 540秒） |
+| `run.googleapis.com/request_latencies` | 実行時間（分布） | P99 < 480秒（タイムアウトの 89%） |
+| `run.googleapis.com/container/instance_count` | 稼働インスタンス数 | max_instance_count (3) 以下 |
 
-### Cloud Functions - HTTP API
+### Cloud Functions Gen2 - HTTP API（Cloud Run メトリクス）
 
 | メトリクス | 説明 |
 |---|---|
-| `cloudfunctions.googleapis.com/function/execution_count{status="ok"}` | 成功リクエスト数 |
-| `cloudfunctions.googleapis.com/function/execution_count{status!="ok"}` | エラーリクエスト数 |
-| `cloudfunctions.googleapis.com/function/execution_times` | API レイテンシ分布 |
+| `run.googleapis.com/request_count{response_code_class="2xx"}` | 成功リクエスト数 |
+| `run.googleapis.com/request_count{response_code_class="4xx" or "5xx"}` | エラーリクエスト数 |
+| `run.googleapis.com/request_latencies` | API レイテンシ分布 |
 
 ### Cloud Tasks
 
@@ -81,8 +85,8 @@ Terraform モジュール `infra/terraform/modules/monitoring` で以下の 3 �
 
 1. GCP Console → Monitoring → Dashboards → Create Dashboard
 2. 以下のウィジェットを追加：
-   - **Line chart**: 解析ワーカー実行回数（status 別）
-   - **Line chart**: API リクエスト数（status 別）
+   - **Line chart**: 解析ワーカー実行回数（response_code_class 別）
+   - **Line chart**: API リクエスト数（response_code_class 別）
    - **Stacked bar**: Cloud Tasks キュー深度
    - **Scorecard**: 過去 24h の解析成功/失敗件数
 3. ダッシュボードを `PhoenixDevOps - Overview` として保存
@@ -98,21 +102,24 @@ Terraform モジュール `infra/terraform/modules/monitoring` で以下の 3 �
 ### 解析ワーカーのエラーログを確認する
 
 ```
-resource.labels.function_name="phoenixdevops-dev-analysis-worker"
+resource.type="cloud_run_revision"
+resource.labels.service_name="phoenixdevops-dev-analysis-worker"
 severity>=ERROR
 ```
 
 ### 特定ジョブの実行ログをすべて確認する
 
 ```
-resource.labels.function_name="phoenixdevops-dev-analysis-worker"
+resource.type="cloud_run_revision"
+resource.labels.service_name="phoenixdevops-dev-analysis-worker"
 (jsonPayload.jobId="<JOB_ID>" OR textPayload=~"<JOB_ID>")
 ```
 
 ### Gemini API 呼び出しエラーを特定する
 
 ```
-resource.labels.function_name="phoenixdevops-dev-analysis-worker"
+resource.type="cloud_run_revision"
+resource.labels.service_name="phoenixdevops-dev-analysis-worker"
 severity>=ERROR
 (textPayload=~"Gemini|GoogleGenerativeAI|GenerateContent" OR jsonPayload.message=~"Gemini|quota|rate.limit")
 ```
@@ -128,7 +135,8 @@ severity>=WARNING
 ### HTTP API のリクエスト/レスポンス状況
 
 ```
-resource.labels.function_name="phoenixdevops-dev-api"
+resource.type="cloud_run_revision"
+resource.labels.service_name="phoenixdevops-dev-api"
 httpRequest.status>=400
 ```
 

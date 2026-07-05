@@ -7,6 +7,7 @@ import {
   ExtractionResult,
   SsotSynthesisGenerator,
 } from "../src/engines.js";
+import { InfrastructureAgent } from "../src/infra.js";
 import { AnalysisOrchestrator } from "../src/orchestrator.js";
 import { AnalysisTaskPayload, StorageObjectRef } from "../src/payload.js";
 import { SynthesisComponentSpecifications } from "../src/prompts.js";
@@ -62,6 +63,12 @@ class StaticSsotSynthesisGenerator implements SsotSynthesisGenerator {
   }
 }
 
+class StaticInfrastructureAgent implements InfrastructureAgent {
+  async analyze(): Promise<string> {
+    return "# Infrastructure Spec\n\nGenerated infrastructure view.\n";
+  }
+}
+
 test("AnalysisOrchestrator writes source analysis, component specs, and SSOT artifacts", async () => {
   const writer = new InMemoryArtifactWriter();
   const ssotSynthesisGenerator = new StaticSsotSynthesisGenerator();
@@ -86,6 +93,7 @@ test("AnalysisOrchestrator writes source analysis, component specs, and SSOT art
     }),
     trueDesignGenerator: new StaticGenerator("# True Design\n"),
     driftReportGenerator: new StaticGenerator("# Drift Report\n"),
+    infrastructureAgent: new StaticInfrastructureAgent(),
     databaseSchemaEngine: new StaticDatabaseSchemaEngine(),
     ssotSynthesisGenerator,
   });
@@ -107,12 +115,14 @@ test("AnalysisOrchestrator writes source analysis, component specs, and SSOT art
     "database_schema_spec.md",
     "document-drift-report.md",
     "iac-structure.md",
+    "infrastructure_spec.md",
     "module-dependencies.mmd",
     "single-source-of-truth.md",
     "true-design.md",
   ]);
   assert.equal(files["single-source-of-truth.md"], "# Single Source of Truth\n");
-  assert.match(ssotSynthesisGenerator.componentSpecifications?.infrastructureSpecMarkdown ?? "", /IaC Structure/);
+  assert.equal(files["infrastructure_spec.md"], "# Infrastructure Spec\n\nGenerated infrastructure view.\n");
+  assert.match(ssotSynthesisGenerator.componentSpecifications?.infrastructureSpecMarkdown ?? "", /Infrastructure Spec/);
   assert.match(ssotSynthesisGenerator.componentSpecifications?.apiSpecMarkdown ?? "", /openapi: 3\.0\.0/);
   assert.match(ssotSynthesisGenerator.componentSpecifications?.databaseSchemaSpecMarkdown ?? "", /DB Schema/);
 });
