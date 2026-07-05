@@ -21,8 +21,8 @@ resource "google_monitoring_notification_channel" "email" {
 }
 
 # ── ログベースメトリクス ──────────────────────────────────────────────────────
-# Cloud Functions Gen2 のログは Cloud Run リビジョンとして記録される。
-# 関数名はサービス名と一致するため function_name ラベルで絞り込む。
+# Cloud Functions Gen2 の実行ログは resource.type="cloud_run_revision" として記録され、
+# 関数名は service_name ラベルに入る（function_name ラベルは Gen1 のみ）。
 
 resource "google_logging_metric" "worker_errors" {
   name    = "${var.name_prefix}-worker-errors"
@@ -30,7 +30,8 @@ resource "google_logging_metric" "worker_errors" {
 
   # ERROR 以上の重大度を持つ解析ワーカーログをカウント
   filter = join("\n", [
-    "resource.labels.function_name=\"${var.worker_function_name}\"",
+    "resource.type=\"cloud_run_revision\"",
+    "resource.labels.service_name=\"${var.worker_function_name}\"",
     "severity>=ERROR",
   ])
 
@@ -47,7 +48,8 @@ resource "google_logging_metric" "api_errors" {
   project = var.project_id
 
   filter = join("\n", [
-    "resource.labels.function_name=\"${var.api_function_name}\"",
+    "resource.type=\"cloud_run_revision\"",
+    "resource.labels.service_name=\"${var.api_function_name}\"",
     "severity>=ERROR",
   ])
 
@@ -87,11 +89,10 @@ resource "google_monitoring_alert_policy" "worker_errors" {
     }
   }
 
+  # notification_rate_limit はログマッチ条件専用のためメトリクス閾値条件では使用しない。
+  # 通知ノイズは条件解消後の自動クローズ（30分）で抑える。
   alert_strategy {
-    # 連続アラートのノイズを抑えるため同一条件で 1時間に 1通のみ通知する
-    notification_rate_limit {
-      period = "3600s"
-    }
+    auto_close = "1800s"
   }
 
   notification_channels = local.notification_channel_ids
@@ -105,7 +106,8 @@ resource "google_monitoring_alert_policy" "worker_errors" {
       ### 確認手順
       1. [Cloud Logging](https://console.cloud.google.com/logs) でフィルタを適用してエラーログを確認する
          ```
-         resource.labels.function_name="${var.worker_function_name}"
+         resource.type="cloud_run_revision"
+         resource.labels.service_name="${var.worker_function_name}"
          severity>=ERROR
          ```
       2. `jsonPayload.message` や `textPayload` でエラー内容を特定する
@@ -143,9 +145,7 @@ resource "google_monitoring_alert_policy" "api_errors" {
   }
 
   alert_strategy {
-    notification_rate_limit {
-      period = "1800s"
-    }
+    auto_close = "1800s"
   }
 
   notification_channels = local.notification_channel_ids
@@ -159,7 +159,8 @@ resource "google_monitoring_alert_policy" "api_errors" {
       ### 確認手順
       1. [Cloud Logging](https://console.cloud.google.com/logs) でフィルタを適用してエラーログを確認する
          ```
-         resource.labels.function_name="${var.api_function_name}"
+         resource.type="cloud_run_revision"
+         resource.labels.service_name="${var.api_function_name}"
          severity>=ERROR
          ```
       2. HTTP ステータスコードと `httpRequest.status` を確認する
@@ -170,8 +171,10 @@ resource "google_monitoring_alert_policy" "api_errors" {
   }
 }
 
-# Cloud Functions 実行回数: タイムアウト・クラッシュ検出アラート
-# ログベースではなく CF ネイティブメトリクスで実行ステータスを監視する
+# 解析ワーカー実行失敗: タイムアウト・クラッシュ検出アラート
+# Cloud Functions Gen2 は Cloud Run 上で動作するため、Gen1 用の
+# cloudfunctions.googleapis.com/function/execution_count ではなく
+# Cloud Run の request_count（5xx: クラッシュ=500 / タイムアウト=504）を監視する。
 resource "google_monitoring_alert_policy" "worker_execution_failures" {
   project      = var.project_id
   display_name = "[PhoenixDevOps] 解析ワーカー 実行失敗（タイムアウト/クラッシュ）"
@@ -179,15 +182,14 @@ resource "google_monitoring_alert_policy" "worker_execution_failures" {
   enabled      = length(var.alert_email_addresses) > 0
 
   conditions {
-    display_name = "Worker function non-ok executions"
+    display_name = "Worker 5xx responses"
 
     condition_threshold {
-      # status が ok 以外（error / timeout / crash / connection_error）の実行をカウント
       filter = join(" AND ", [
-        "resource.type = \"cloud_function\"",
-        "resource.labels.function_name = \"${var.worker_function_name}\"",
-        "metric.type = \"cloudfunctions.googleapis.com/function/execution_count\"",
-        "(metric.labels.status = \"error\" OR metric.labels.status = \"timeout\" OR metric.labels.status = \"crash\" OR metric.labels.status = \"connection_error\")",
+        "resource.type = \"cloud_run_revision\"",
+        "resource.labels.service_name = \"${var.worker_function_name}\"",
+        "metric.type = \"run.googleapis.com/request_count\"",
+        "metric.labels.response_code_class = \"5xx\"",
       ])
       comparison      = "COMPARISON_GT"
       duration        = "0s"
@@ -201,9 +203,7 @@ resource "google_monitoring_alert_policy" "worker_execution_failures" {
   }
 
   alert_strategy {
-    notification_rate_limit {
-      period = "3600s"
-    }
+    auto_close = "1800s"
   }
 
   notification_channels = local.notification_channel_ids
@@ -212,10 +212,10 @@ resource "google_monitoring_alert_policy" "worker_execution_failures" {
     content   = <<-EOT
       ## 解析ワーカー 実行失敗アラート（タイムアウト/クラッシュ）
 
-      **対象**: `${var.worker_function_name}` (Cloud Functions)
+      **対象**: `${var.worker_function_name}` (Cloud Functions Gen2 / Cloud Run)
 
-      `timeout` が多発する場合は解析対象ファイル数・サイズが上限を超えている可能性があります。
-      `crash` / `error` の場合はランタイムエラーです。Cloud Logging で詳細を確認してください。
+      `504` が多発する場合はタイムアウトです。解析対象ファイル数・サイズが上限を超えている可能性があります。
+      `500` の場合はランタイムエラー（クラッシュ）です。Cloud Logging で詳細を確認してください。
     EOT
     mime_type = "text/markdown"
   }
