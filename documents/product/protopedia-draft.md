@@ -74,7 +74,7 @@ Claude Code をはじめとする AI エージェントの指示・設定（プ�
 
 | カテゴリ | 技術 | 用途 |
 |---|---|---|
-| AI エンジン | Gemini API (gemini-2.5-flash-preview-05-20) | コード解析・仕様生成 |
+| AI エンジン | Gemini API (gemini-3.1-flash-lite / Vertex AI 経由) | コード解析・仕様生成 |
 | バックエンド | Cloud Functions Gen2 (Node.js / TypeScript) | API・解析ワーカー |
 | 非同期処理 | Cloud Tasks | 解析ジョブのキューイング |
 | DB | Firestore | 解析ジョブ状態管理 |
