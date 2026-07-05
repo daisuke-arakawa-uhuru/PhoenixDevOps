@@ -9,7 +9,7 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 - `src/repositories.js`: Firestore のジョブ状態管理境界
 - `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
 - `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
-- `src/engines.js`: F-02/F-03/F-04/F-05 と SSOT 合成の解析・生成フェーズ境界
+- `src/engines.js`: F-02/F-03/F-04/F-05、DB/API/ビジネスロジック個別解析、SSOT 合成の解析・生成フェーズ境界
 - `src/code-map.js`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
 - `src/infra.js`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補と STEP 1 静的解析成果物を抽出し Gemini で `infrastructure_spec.md` を生成
 - `src/prompts.js`: Gemini に渡す prompt 生成
@@ -146,6 +146,7 @@ npm run local -- \
 | `document-drift-report.md` | 既存ドキュメントとの差分レポート |
 | `database_schema_spec.md` | DB・データモデル仕様書（ER図、データディクショナリ、リレーション・制約一覧） |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケース、状態遷移、シーケンス図） |
+| `api_specification.md` | API仕様書（エンドポイント、リクエスト/レスポンス、バリデーション、認証認可） |
 | `codebase-map.md` | ディレクトリツリー、ファイルメタデータ、依存リスト、API/DB候補の静的解析ダンプ |
 | `module-dependencies.mmd` | JS/TS、Python、Go の import/require を軽量抽出した Mermaid 依存グラフ |
 | `iac-structure.md` | Terraform の provider/module/resource/data/variable/output 構造リスト |
@@ -241,6 +242,22 @@ STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`�
 | --- | --- |
 | `business_logic_spec.md` | ビジネスロジック仕様書（機能一覧、ユースケースシナリオ、状態遷移、シーケンス図、例外処理・ロールバック仕様、ビジネスルール） |
 
+## API・インターフェース解析（STEP 2-③）
+
+STEP 1 の静的解析成果物（`codebase-map.json`、`exported-symbols-*.md`）と、ルーティング、コントローラー、バリデーション、OpenAPI 候補を含むソースコードを入力として、API・インターフェースの個別解析を行います。
+
+### 解析内容
+
+- ルーティング、コントローラー、DTO/バリデーション定義から API 関連ファイルを自動特定
+- Gemini API でエンドポイント、入出力、認証認可、バリデーション、エラーハンドリングを解析・言語化
+- 既存の OpenAPI / Swagger 断片があれば補助根拠として取り込み、Markdown 形式の API 仕様書を生成
+
+### 成果物
+
+| ファイル | 内容 |
+| --- | --- |
+| `api_specification.md` | API仕様書（エンドポイント一覧、リクエスト/レスポンス、バリデーション、認証認可、エラー応答） |
+
 ## SSOT合成（STEP 3）
 
 STEP 2 の個別解析成果物と STEP 1 の静的解析成果物を入力として、システム全体の Single Source of Truth を合成します。
@@ -257,4 +274,3 @@ STEP 2 の個別解析成果物と STEP 1 の静的解析成果物を入力と�
 | ファイル | 内容 |
 | --- | --- |
 | `single-source-of-truth.md` | 統合仕様書（システム全体像、コンポーネント図、データフロー図、エンドポイント別データフロー、インフラ対応、横断仕様） |
->>>>>>> origin/feature/issue-35-satoshi
