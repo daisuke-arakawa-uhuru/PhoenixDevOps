@@ -40,12 +40,20 @@ Web 画面から API を呼び、解析ジョブを非同期実行する構成�
 
 ```text
 PhoenixDevOps/
-├── apps/              # アプリ（api / ui / analysis-worker）※未着手
+├── apps/              # アプリ（api / ui / analysis-worker）
+│   ├── api/           # HTTP API（Hono / Cloud Functions）
+│   ├── ui/            # Web UI（Vite + React + TypeScript）
+│   └── analysis-worker/ # 解析ワーカー（Cloud Functions / Gemini API）
 ├── documents/         # プロダクト概要・機能仕様・設計メモ
-│   └── engineering/   # 開発・ハーネス運用の規約
+│   ├── product/       # プロダクト概要書
+│   ├── features/      # 機能仕様書
+│   ├── design/        # 設計ドキュメント（アーキテクチャ・静的解析・Firestore）
+│   ├── engineering/   # 開発・ハーネス運用の規約
+│   └── infra/         # インフラ関連の参考資料（構成図等）
 ├── infra/             # GCP 構成（Terraform / IaC）
 │   └── terraform/     # modules/ と envs/ に分割
 ├── input/             # ハッカソン条件などの外部入力資料
+├── sample/            # 解析テスト用サンプルデータ
 ├── .github/workflows/ # CI/CD（Terraform plan/apply）
 ├── .claude/           # エージェントのハーネス設定（commands / agents / settings）
 ├── AGENTS.md          # 他ツール向けエージェント入口
