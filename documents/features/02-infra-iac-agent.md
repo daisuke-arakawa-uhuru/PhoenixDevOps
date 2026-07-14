@@ -20,8 +20,8 @@ Issue #31（親 Issue #17 / STEP 2-①）の機能仕様。
 `apps/analysis-worker` の解析パイプラインに組み込まれる個別エージェント。
 ソースコード解析（F-02）やドキュメント抽出（F-03）と並行し、IaC に特化した成果物を 1 つ追加する。
 
-- 実装: `apps/analysis-worker/src/infra.js`
-- オーケストレータ: `apps/analysis-worker/src/orchestrator.js` の `infrastructureAgent`
+- 実装: `apps/analysis-worker/src/infra.ts`
+- オーケストレータ: `apps/analysis-worker/src/orchestrator.ts` の `infrastructureAgent`
 - 成果物: `infrastructure_spec.md`
 
 ## 3. 入力仕様
@@ -83,5 +83,5 @@ Gemini の生成内容が静的事実と突き合わせて検証できるよう�
 
 ## 7. テスト
 
-`apps/analysis-worker/test/infra.test.js` で、IaC ファイル判定・Terraform/compose/k8s/Dockerfile の静的抽出・
+`apps/analysis-worker/test/infra.test.ts` で、IaC ファイル判定・Terraform/compose/k8s/Dockerfile の静的抽出・
 STEP 1 静的解析成果物/AWS CDK/CloudFormation 候補の補助入力化・セキュリティ分類・prompt 組み立て・エージェント結合（Gemini クライアントはスタブ）・IaC なし時の Gemini 非呼び出し・通常ソース件数制限外の IaC 読み込みを検証する。

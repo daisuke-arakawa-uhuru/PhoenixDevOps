@@ -4,16 +4,21 @@ Issue #4 用の Cloud Functions バックグラウンドワーカーです。Clo
 
 ## 構成
 
-- `src/index.js`: Cloud Functions HTTP エントリポイント `runAnalysisWorker`
-- `src/payload.js`: Cloud Tasks payload の検証と正規化
-- `src/repositories.js`: Firestore のジョブ状態管理境界
-- `src/storage.js`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
-- `src/orchestrator.js`: ジョブ状態遷移と解析フェーズ実行制御
-- `src/engines.js`: F-02/F-03/F-04/F-05、DB/API/ビジネスロジック個別解析、SSOT 合成の解析・生成フェーズ境界
-- `src/code-map.js`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
-- `src/infra.js`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補と STEP 1 静的解析成果物を抽出し Gemini で `infrastructure_spec.md` を生成
-- `src/prompts.js`: Gemini に渡す prompt 生成
-- `src/local-runner.js`: ローカル実行用 CLI
+- `src/index.ts`: Cloud Functions HTTP エントリポイント `runAnalysisWorker`
+- `src/payload.ts`: Cloud Tasks payload の検証と正規化
+- `src/config.ts`: WorkerConfig の環境変数読み込みと検証
+- `src/factories.ts`: Orchestrator と各エンジンのビルダー
+- `src/repositories.ts`: Firestore のジョブ状態管理境界
+- `src/storage.ts`: Cloud Storage/ローカル入力読み込みと成果物保存の境界
+- `src/orchestrator.ts`: ジョブ状態遷移と解析フェーズ実行制御
+- `src/engines.ts`: F-02/F-03/F-04/F-05、DB/API/ビジネスロジック個別解析、SSOT 合成の解析・生成フェーズ境界
+- `src/gemini.ts`: Gemini API クライアント（GoogleGenAI / DryRun / リトライ・quota エラー処理）
+- `src/code-map.ts`: ソースコードの静的構造マップ、依存グラフ、IaC構造ダンプ生成
+- `src/infra.ts`: インフラ・IaC個別解析エージェント（Issue #31）。Terraform / AWS CDK / docker-compose / Dockerfile / Kubernetes / CloudFormation 候補と STEP 1 静的解析成果物を抽出し Gemini で `infrastructure_spec.md` を生成
+- `src/prompts.ts`: Gemini に渡す prompt 生成
+- `src/zip.ts`: ZIP アーカイブ展開ユーティリティ
+- `src/local-runner.ts`: ローカル実行用 CLI
+- `src/local-env.ts`: ローカル実行時の `.env` ファイル読み込み
 
 ## システム構成
 

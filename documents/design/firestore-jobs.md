@@ -20,17 +20,22 @@
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
 | `id` | string | ✓ | ジョブ ID。ドキュメント ID と同値 |
+| `job_id` | string | ✓ | ジョブ ID（`id` と同値。API 側の書き込み互換用） |
 | `status` | string | ✓ | ジョブ状態。`queued` / `running` / `succeeded` / `failed` のいずれか |
 | `project_name` | string |   | ユーザー入力のプロジェクト名（任意。成果物タイトルに使用） |
+| `source_archive_uri` | string | ✓ | ソースコードアーカイブの GCS URI（例: `gs://bucket/uploads/upload-id/source/src.zip`） |
+| `document_uris` | array\<string\> | ✓ | 既存ドキュメント群の GCS URI 配列 |
+| `upload_id` | string |   | 対応するアップロードの ID（`uploads` コレクションへの参照） |
+| `results_prefix` | string |   | 生成成果物の GCS プレフィックス（例: `results/<job_id>/`） |
+| `artifact_paths` | map\<string, string\> |   | 成果物ファイル名と GCS URI のマップ。解析ワーカーが `succeeded` 時に書き込む |
 | `created_at` | timestamp | ✓ | ジョブ作成日時（サーバータイムスタンプ） |
 | `updated_at` | timestamp | ✓ | 最終更新日時（状態遷移のたびに更新） |
 | `error_message` | string |   | `failed` 時の失敗理由。ユーザーに表示する |
-| `uploads_prefix` | string |   | 入力ファイルの GCS プレフィックス（例: `uploads/<job_id>/`） |
-| `results_prefix` | string |   | 生成成果物の GCS プレフィックス（例: `results/<job_id>/`） |
 
-> `uploads_prefix` / `results_prefix` は Cloud Storage（[storage モジュール](../../infra/terraform/modules/storage)）の
-> `uploads/` `results/` 配下にジョブ単位のサブプレフィックスを切る運用を想定した補助フィールド。
-> 必須ではないが、ジョブと保存先の対応を Firestore 側で引けるようにするため定義する。
+> `source_archive_uri` / `document_uris` は Cloud Storage（[storage モジュール](../../infra/terraform/modules/storage)）の
+> `uploads/` 配下にアップロード単位のサブプレフィックスを切る運用に対応した参照フィールド。
+> `upload_id` は `uploads` コレクション（[firestore-uploads.md](./firestore-uploads.md)）へのリレーション。
+> `artifact_paths` は解析ワーカーが `succeeded` 時に保存し、API の `GET /jobs/{jobId}/results` で署名付き URL の生成元として使用する。
 
 ## 3. 状態遷移
 
@@ -66,13 +71,19 @@
 ```json
 {
   "id": "1f2e3d4c-5b6a-7980-abcd-ef0123456789",
+  "job_id": "1f2e3d4c-5b6a-7980-abcd-ef0123456789",
   "status": "running",
   "project_name": "レガシーSaaS引き継ぎ案件A",
+  "source_archive_uri": "gs://phoenix-assets/uploads/upload-abc/source/src.zip",
+  "document_uris": [
+    "gs://phoenix-assets/uploads/upload-abc/documents/0001-spec.pdf"
+  ],
+  "upload_id": "upload-abc",
+  "results_prefix": "results/1f2e3d4c-5b6a-7980-abcd-ef0123456789",
+  "artifact_paths": {},
   "created_at": "2026-06-08T09:00:00Z",
   "updated_at": "2026-06-08T09:01:12Z",
-  "error_message": null,
-  "uploads_prefix": "uploads/1f2e3d4c-5b6a-7980-abcd-ef0123456789/",
-  "results_prefix": "results/1f2e3d4c-5b6a-7980-abcd-ef0123456789/"
+  "error_message": null
 }
 ```
 
